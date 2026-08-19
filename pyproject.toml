@@ -1,0 +1,12 @@
+[project]
+name = "eidolon-graph-ref"
+version = "0.1.0"
+description = "Kernel Semantics 的可执行参考实现：事件驱动图运行时最小内核（架构验证用）"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
