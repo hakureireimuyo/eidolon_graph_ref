@@ -334,7 +334,29 @@ class Executor:
 
     # ================================================================== 投递
     def _deliver(self, inst: "GraphInstance", ev: Event, dst_node: str, dst_port: str, dst_slot: str, queue: deque[str]) -> None:
-        """投递 = 一次下游端口状态更新 + 唤醒（深度优先，插队即时结算）。"""
+        """投递 = 一次下游端口状态更新 + 唤醒（深度优先，插队即时结算）。
+
+        Delivery 是投递动作的事实：先于端口状态更新创建、先于"到达即消费"
+        的记录入档，保证时间线因果序（deliver → consume）与 Delivery 生命
+        周期一致——LOW 自消费路径也必须能标记到本次投递。
+        """
+        delivery = Delivery(
+            event_id=ev.id, node=dst_node, port=dst_port, slot=dst_slot, seq=inst.timeline.next_seq
+        )
+        ev.deliveries.append(delivery)
+        inst.timeline.record(
+            Entry(
+                run=ev.run,
+                kind=KIND_DELIVER,
+                event_id=ev.id,
+                payload=ev.payload,
+                src_node=ev.producer,
+                src_port=ev.port,
+                dst_node=dst_node,
+                dst_port=dst_port,
+                dst_slot=dst_slot,
+            )
+        )
         if dst_slot == SLOT_DATA:
             ds = inst.data_states[dst_node][dst_port]
             ds.receive(ev)
@@ -366,20 +388,4 @@ class Executor:
             inst.enable_states[dst_node][dst_port].receive(ev)
         else:
             raise ValueError(f"unknown slot {dst_slot!r}")
-        ev.deliveries.append(
-            Delivery(event_id=ev.id, node=dst_node, port=dst_port, slot=dst_slot, seq=inst.timeline.next_seq)
-        )
-        inst.timeline.record(
-            Entry(
-                run=ev.run,
-                kind=KIND_DELIVER,
-                event_id=ev.id,
-                payload=ev.payload,
-                src_node=ev.producer,
-                src_port=ev.port,
-                dst_node=dst_node,
-                dst_port=dst_port,
-                dst_slot=dst_slot,
-            )
-        )
         queue.appendleft(dst_node)
