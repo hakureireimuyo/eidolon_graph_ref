@@ -1,9 +1,12 @@
 # Asset 模型(运行时资源平面)
 
-> 状态:已裁定,待验证实现(2026-08-20)
+> 状态:已裁定 + 已验证(2026-08-20,§9 七条边界全部通过;裁定修订:声明即必须)
 >
-> 定位:本文档锁定 Asset 层的语义裁定。实现前先在最小验证内核中以假
-> AssetSystem 验证边界(见 §9),测试通过后再迁移主内核。
+> 定位:本文档锁定 Asset 层的语义裁定。最小验证内核以假 AssetSystem
+> 验证边界(见 §9)已全部通过,待迁移主内核。
+>
+> 相关:[节点 ↔ 资产 ↔ 资产管理系统协议](./graph-asset-protocols.md)——
+> Asset 层内部的三方协议(使用面 / 管理面)。
 
 ## 1. 背景与动机
 
@@ -129,7 +132,7 @@ source → parse → type check → link → initialize → execute
 
 | 问题 | 裁定 |
 |---|---|
-| 可选资产未绑定 | 槽位恒存在,值为 `None`。`ctx.assets` 的键集合由 `NodeType.asset_in` 决定,不由绑定情况决定。`None` 表示"该声明存在,但当前没有资产"——不是资产状态,不传播、不进事件档案 |
+| 资产槽位未绑定 | **声明即必须**(2026-08-20 修订,替代原"可选 → None"裁定):声明的槽位构建期必须绑定且解析成功,否则 BuildReport error——资产是资源而非数据,缺席是结构缺陷,不允许"运行时才发现"。降级需求由资产系统提供 Null 资产(真实 Capability),内核永不出 None 槽位 |
 | 构建错误形态 | `BuildReport` 一次性收集全部错误(资产依赖多,逐个报错会让宿主反复启动);`ok=False` 时**不存在** GraphInstance。API 为 `result = GraphInstance.build(...)`,禁止"构造半成品再 try resolve" |
 | 绑定归属 | **GraphDefinition**(编辑期纯数据)。NodeType 声明"需要什么",图指定"使用哪个",实例解析"实际是什么"。类型声明不应知道具体运行环境的资产身份 |
 | AssetRef 内容 | 仅 `asset_id`(实例身份),不含创建参数。参数属于资产系统创建时的配置 |
@@ -137,6 +140,7 @@ source → parse → type check → link → initialize → execute
 | 快照 | 只含 Graph 引用 + Node State + 执行状态 + AssetRef。恢复 = 恢复逻辑状态 + 对**当前**资产系统重新解析,绝不恢复旧资产对象 |
 | 资产失效 | 不自动变成 Signal/Data/Trigger Event。节点调用失败 → 异常 → KIND_ERROR;资产系统后台断线重连恢复,Graph 不需要知道 |
 | 注入时机 | 资产在 Graph 构建前已由资产系统创建,构建期 lookup 即 eager——懒解析没有意义 |
+| State/Data 值域 | **Value 与 Capability 分属不同语义类别**(2026-08-20 裁定):State/Data/Event 载荷的值域 = Value(可复制/可序列化),Capability 不得进入任何传播/状态平面。执行点:状态提交、数据产出、宿主注入三入口 deepcopy **探针**校验(只校验不复制,数据平面保持零拷贝),失败 → 状态/产出 KIND_ERROR + 拒绝提交、注入 ValueError。判据是可复制性——恰好可复制的"伪能力"对象属契约外,与反射绕过同一信任模型 |
 
 ## 8. API 形状(草案)
 
@@ -146,7 +150,7 @@ source → parse → type check → link → initialize → execute
 class AssetIn:
     name: str
     type: type | None = None   # Capability 接口(类或 runtime_checkable Protocol)
-    required: bool = True
+                               # 声明即必须:构建期必须绑定并解析成功(§7 裁定)
 
 @dataclass(frozen=True)
 class AssetRef:
@@ -169,7 +173,7 @@ if not result.ok:
 world = result.instance
 
 # tick 访问;键集合 = 声明集合;tick 不可写资产
-ctx.assets["database"]            # 可选未绑定 → None
+ctx.assets["database"]            # 构建期已解析成功(声明即必须),恒为 Capability
 
 # observable_state 只暴露结构事实,绝不暴露对象
 "assets": {"database": {"ref": "main_db", "resolved": True}}
@@ -186,14 +190,14 @@ ctx.assets["database"]            # 可选未绑定 → None
 - 构建期解析:逐节点按声明序 lookup → `isinstance` 校验 → 注入;错误收集成
   报告一次性返回,不留半构建实例
 
-## 9. 待验证边界(进入主内核前)
+## 9. 已验证边界(进入主内核前)
 
-以假 `AssetSystem + AssetResolver + Capability` 实现验证以下边界,全部通过后
-Asset 层即可裁定并迁移主内核:
+以假 `AssetSystem + AssetResolver + Capability` 实现验证以下边界。验证结果:
+**全部通过**(2026-08-20,`tests/test_assets.py` 13 例)。
 
 1. 同一 Asset 被多个节点共享(同一 `asset_id` → 同一底层实例)
 2. 相同参数创建两个独立 Asset(身份独立于参数)
-3. 必需资产缺失 → BuildReport error;可选资产未绑定 → `ctx.assets[slot] is None`
+3. 资产未绑定或缺失 → BuildReport error(声明即必须);降级经资产系统 Null 资产(真实 Capability)
 4. 类型错误 → BuildReport error;多错误一次收集
 5. GraphInstance 销毁不关闭 Asset(所有权在资产系统)
 6. 运行期间 Asset 失效 → tick 异常 / KIND_ERROR,不产生任何传播事件;

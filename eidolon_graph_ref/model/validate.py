@@ -146,6 +146,21 @@ def validate(graph: GraphDefinition, types: dict[str, NodeType]) -> ValidationRe
             if key not in valid_keys:
                 errors.append(f"node {nid!r}: unknown config field {key!r}")
 
+    # 资产绑定：编辑期只检查结构（绑定引用已声明的槽、节点存在；绑定唯一由
+    # (node, slot) 键保证）。资产是否存在是运行期问题（目录在资产系统里），
+    # 编辑期不检查（graph-assets.md §8）。
+    for (nid, slot), ref in graph.asset_bindings.items():
+        if nid not in graph.nodes:
+            errors.append(f"asset binding ({nid!r}, {slot!r}): unknown node {nid!r}")
+            continue
+        ntype = types.get(graph.nodes[nid].type)
+        if ntype is None:
+            continue  # 未知节点类型已报错
+        if slot not in {a.name for a in ntype.asset_in}:
+            errors.append(
+                f"asset binding ({nid!r}, {slot!r}): node type {ntype.name!r} declares no asset slot {slot!r}"
+            )
+
     # 扇入禁止：每(节点, 端口, 槽位)至多一条线
     seen: set[tuple[str, str, str]] = set()
     for wire in graph.wires:

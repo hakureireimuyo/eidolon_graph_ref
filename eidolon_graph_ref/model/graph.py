@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .assets import AssetRef
+
 # 连线目标槽位：决定"这条线传递什么、端口如何消费它"
 # DataIn 有两个可接线槽位：data(数据槽) / qual(资格槽，仅 qualified=True 时存在)
 # TriggerIn 一个槽位：trigger；SignalIn 一个槽位：signal
@@ -53,6 +55,7 @@ class GraphDefinition:
         self.name = name
         self._nodes: dict[str, NodeSpec] = {}
         self._wires: list[Wire] = []
+        self._asset_bindings: dict[tuple[str, str], AssetRef] = {}
 
     # ---- 构建 API ----------------------------------------------------------
     def add_node(self, node_id: str, type_name: str, **config: Any) -> GraphDefinition:
@@ -78,6 +81,18 @@ class GraphDefinition:
         self._wires.append(wire)
         return self
 
+    def bind_asset(self, node_id: str, slot: str, asset_id: str) -> GraphDefinition:
+        """绑定 (节点, 槽位) → AssetRef(编辑期纯数据,§7 裁定:绑定归属图定义)。
+
+        共享/独立不由 Runtime 强制,完全由指向哪个 asset_id 决定(§7 裁定);
+        绑定唯一由键 (node, slot) 保证,重复绑定即报错。
+        """
+        key = (node_id, slot)
+        if key in self._asset_bindings:
+            raise ValueError(f"duplicate asset binding {key!r}")
+        self._asset_bindings[key] = AssetRef(asset_id)
+        return self
+
     # ---- 查询 ---------------------------------------------------------------
     @property
     def nodes(self) -> dict[str, NodeSpec]:
@@ -86,6 +101,11 @@ class GraphDefinition:
     @property
     def wires(self) -> tuple[Wire, ...]:
         return tuple(self._wires)
+
+    @property
+    def asset_bindings(self) -> dict[tuple[str, str], AssetRef]:
+        """资产绑定表:键 (节点, 槽位) → AssetRef。"""
+        return dict(self._asset_bindings)
 
     def node_order(self) -> list[str]:
         """节点声明序（播种等使用）。"""

@@ -72,6 +72,14 @@ class Executor:
     def _inject(self, inst: "GraphInstance", inj: Injection, queue: deque[str]) -> None:
         """宿主注入 = 事件产生(producer=None) + 单次投递。与节点产出完全同构。"""
         tl = inst.timeline
+        # 值域探针（宿主入口同样执行）：不可复制载荷 = 宿主编程错误，fail fast。
+        # 只校验不复制：注入载荷以原对象进入数据平面（零拷贝）
+        try:
+            deepcopy(inj.payload)
+        except Exception:
+            raise ValueError(
+                f"injection into {inj.node}.{inj.port} carries non-copyable payload: {type(inj.payload).__name__}"
+            )
         ev = Event(
             id=tl.new_event_id(),
             run=inst.run_no,
@@ -192,6 +200,7 @@ class Executor:
             data_in=data_in,
             state=deepcopy(inst.node_states[nid]),
             config=inst.configs[nid],
+            assets=dict(inst.assets.get(nid, {})),  # 浅拷贝：能力对象共享，tick 插入不影响节点 store
         )
         try:
             out = ntype.tick(ctx)
@@ -206,7 +215,8 @@ class Executor:
         # 消费本轮 pending（执行后重新等待；缓存值保持）
         consumed = self._consume(inst, nid, group)
 
-        # 状态提交
+        # 状态提交（值域 = Value：可复制/可序列化，Capability 不得进入状态平面，
+        # 2026-08-20 裁定。deepcopy 即校验：失败 → KIND_ERROR + 拒绝提交该字段）
         if out.state:
             unknown = set(out.state) - set(ntype.state_defaults)
             if unknown:
@@ -214,7 +224,17 @@ class Executor:
                 inst.log.append(f"[{inst.run_no}] {nid}.{group.name} {msg}")
                 tl.record(Entry(run=inst.run_no, kind=KIND_ERROR, dst_node=nid, group=group.name, message=msg))
                 out.state = {k: v for k, v in out.state.items() if k not in unknown}
-            inst.node_states[nid].update(out.state)
+            invalid: list[str] = []
+            for field, value in out.state.items():
+                try:
+                    deepcopy(value)  # 值域探针：仅校验可复制性，传输保持零拷贝
+                except Exception:
+                    invalid.append(field)
+            if invalid:
+                msg = f"tick wrote non-copyable values to state fields: {sorted(invalid)}"
+                inst.log.append(f"[{inst.run_no}] {nid}.{group.name} {msg}")
+                tl.record(Entry(run=inst.run_no, kind=KIND_ERROR, dst_node=nid, group=group.name, message=msg))
+            inst.node_states[nid].update({k: v for k, v in out.state.items() if k not in invalid})
 
         fire_entry = tl.record(
             Entry(
@@ -293,6 +313,20 @@ class Executor:
             if port not in declared:
                 inst.timeline.record(
                     Entry(run=inst.run_no, kind=KIND_ERROR, dst_node=nid, message=f"undeclared data output {port!r}")
+                )
+                continue
+            # 值域探针（Value/Capability 分类，2026-08-20 裁定）：不可复制 → 拒绝产出。
+            # 只校验不复制：数据平面保持零拷贝（扇出共享载荷引用是锁定内核事实）
+            try:
+                deepcopy(value)
+            except Exception:
+                inst.timeline.record(
+                    Entry(
+                        run=inst.run_no,
+                        kind=KIND_ERROR,
+                        dst_node=nid,
+                        message=f"data output {port!r} carries non-copyable value",
+                    )
                 )
                 continue
             ev = Event(

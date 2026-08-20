@@ -2,12 +2,14 @@
 
 from .event import Delivery, Event, Injection, Kind
 from .executor import Executor
-from .instance import GraphInstance
+from .instance import AssetResolver, BuildReport, GraphInstance
 from .port_state import DataPortState, SignalPortState, TriggerPortState
 from .protocol import TickContext, TickOutput
 from .timeline import Entry, Timeline
 
 __all__ = [
+    "AssetResolver",
+    "BuildReport",
     "Delivery",
     "Event",
     "Injection",

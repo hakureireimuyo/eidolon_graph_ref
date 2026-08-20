@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from .assets import AssetIn
 from .ports import DataIn, DataOut, SignalIn, SignalOut, TriggerIn
 
 
@@ -42,6 +43,8 @@ class NodeType:
     - state_defaults：状态字段表（带默认值）——实例跨轮事实的唯一存储
     - config_defaults：配置字段表（编辑期覆盖，运行时只读）
     - groups：输入组 = 函数；每组执行时只读本组输入，组间数据经节点状态传递
+    - asset_in：资产依赖声明（资源平面）；运行时经 ctx.assets[槽名] 使用——
+      只有使用权，没有所有权（graph-assets.md §2-5）
     - tick：各组处理逻辑（唯一可重载点）；Readiness 判定、pending 消费、
       输出投递、状态提交是基类 final 语义，节点不可触碰
     """
@@ -52,6 +55,7 @@ class NodeType:
     trigger_in: tuple[TriggerIn, ...] = ()
     signal_in: tuple[SignalIn, ...] = ()  # enable（节点级资格）
     signal_out: tuple[SignalOut, ...] = ()  # 仅信号节点声明
+    asset_in: tuple[AssetIn, ...] = ()  # 资产依赖声明(资源平面,与数据/触发/信号并列)
     state_defaults: dict[str, Any] = field(default_factory=dict)
     config_defaults: dict[str, Any] = field(default_factory=dict)
     groups: tuple[InputGroup, ...] = ()
@@ -100,6 +104,10 @@ class NodeType:
             "trigger_in": [p.name for p in self.trigger_in],
             "signal_in": [p.name for p in self.signal_in],
             "signal_out": [p.name for p in self.signal_out],
+            "asset_in": [
+                {"name": p.name, "type": p.type.__name__ if p.type else None}
+                for p in self.asset_in
+            ],
             "state_defaults": dict(self.state_defaults),
             "config_defaults": dict(self.config_defaults),
             "groups": [

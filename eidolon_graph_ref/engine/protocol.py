@@ -21,7 +21,11 @@ class TickContext:
     group: str  # 组名（源节点自走执行为 "step"）
     data_in: dict[str, Any]  # 本组已解析输入（Data 端口 effective 值 + TriggerIn 载荷）
     state: dict[str, Any]  # 当前状态深拷贝
-    config: dict[str, Any]  # 只读配置
+    config: dict[str, Any]
+    # 本节点资产能力表（浅拷贝：能力对象共享，tick 插入不影响节点 store）。
+    # 键集合由 NodeType.asset_in 声明决定；声明即必须——构建期已全部绑定并
+    # 解析成功（graph-assets.md §7 裁定），不存在 None 槽位。tick 只有使用权。
+    assets: dict[str, Any] = field(default_factory=dict)  # 只读配置
 
     # 节点实现约定（ABI 的一部分，内核零复制投递）：
     # data_in 中的值可能与其他下游端口共享同一个 Python 对象（扇出零复制）——
@@ -34,6 +38,8 @@ class TickContext:
 
 @dataclass
 class TickOutput:
+    # 值域 = Value（可复制/可序列化）：Capability 不得进入状态/传播平面
+    # （2026-08-20 裁定；内核在提交与产出时校验，违者 KIND_ERROR）
     data_out: dict[str, Any] = field(default_factory=dict)  # 输出端口名 → 值（不写即不投递）
     signal_out: dict[str, bool] = field(default_factory=dict)  # 仅信号节点可写
     state: dict[str, Any] = field(default_factory=dict)  # 状态变更字段增量

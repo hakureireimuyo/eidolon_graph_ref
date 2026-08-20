@@ -13,9 +13,11 @@ from eidolon_graph_ref.primitives import PRIMITIVES
 
 
 def make_world(build, types=None) -> GraphInstance:
-    """构建图定义并创建运行实例。"""
+    """构建图定义并创建运行实例（唯一正式路径：GraphInstance.build）。"""
     g = build() if callable(build) else build
-    return GraphInstance(g, types or PRIMITIVES)
+    result = GraphInstance.build(g, types or PRIMITIVES)
+    assert result.ok, result.errors
+    return result.instance
 
 
 def fired(world: GraphInstance, run: int | None = None) -> list[tuple[str, str]]:
