@@ -26,7 +26,7 @@ from eidolon_graph_ref.engine.event import Injection, Kind
 from eidolon_graph_ref.model.graph import GraphDefinition, SLOT_QUAL, SLOT_TRIGGER
 from eidolon_graph_ref.model.validate import ensure_valid
 from eidolon_graph_ref.engine.instance import GraphInstance
-from eidolon_graph_ref.primitives import PRIMITIVES
+from eidolon_primitives import PRIMITIVES
 
 
 def build() -> GraphDefinition:

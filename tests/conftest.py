@@ -9,7 +9,7 @@ from eidolon_graph_ref.engine.instance import GraphInstance
 from eidolon_graph_ref.engine.timeline import KIND_DELIVER, KIND_ERROR, KIND_FIRE, KIND_QUIESCE
 from eidolon_graph_ref.model.graph import GraphDefinition
 from eidolon_graph_ref.model.node_type import NodeType
-from eidolon_graph_ref.primitives import PRIMITIVES
+from eidolon_primitives import PRIMITIVES
 
 
 def make_world(build, types=None) -> GraphInstance:

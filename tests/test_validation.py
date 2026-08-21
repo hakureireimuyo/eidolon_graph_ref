@@ -7,7 +7,7 @@ import pytest
 
 from eidolon_graph_ref.model.graph import GraphDefinition, SLOT_DATA, SLOT_QUAL, SLOT_SIGNAL, SLOT_TRIGGER
 from eidolon_graph_ref.model.validate import ValidationError, ensure_valid, validate
-from eidolon_graph_ref.primitives import PRIMITIVES
+from eidolon_primitives import PRIMITIVES
 
 
 def build_graph(wire_call) -> GraphDefinition:

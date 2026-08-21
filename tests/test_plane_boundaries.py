@@ -49,7 +49,7 @@ from eidolon_graph_ref.model.assets import AssetIn, AssetRef
 from eidolon_graph_ref.model.graph import GraphDefinition, SLOT_DATA
 from eidolon_graph_ref.model.node_type import NodeType
 from eidolon_graph_ref.model.ports import DataOut
-from eidolon_graph_ref.primitives import PRIMITIVES
+from eidolon_primitives import PRIMITIVES
 
 from fake_assets import (
     DatabaseCapability,

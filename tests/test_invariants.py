@@ -5,7 +5,7 @@
 
 from eidolon_graph_ref.engine.event import Injection, Kind
 from eidolon_graph_ref.model.graph import GraphDefinition, SLOT_DATA, SLOT_QUAL, SLOT_TRIGGER
-from eidolon_graph_ref.primitives import PRIMITIVES
+from eidolon_primitives import PRIMITIVES
 
 from conftest import (
     build_pairing_graph,

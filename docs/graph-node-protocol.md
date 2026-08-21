@@ -274,8 +274,9 @@ result = GraphInstance.build(definition, types, asset_resolver=host_resolver)
 
 - `NodeType` 是公开的 frozen dataclass,外部包直接构造即完成"注册"——没有
   内核内注册表、没有装饰器、没有 import 钩子。
-- `PRIMITIVES`(primitives/nodes.py)只是验证原语的便利集合,对外部节点
-  无任何强制。
+- `PRIMITIVES`(`eidolon_primitives` 包,与内核包平级)只是内置验证原语的
+  便利集合:**内置节点 = 包概念,不是内核概念**——内核包源码不含任何
+  primitives 引用(tests/test_bootstrap.py 锁定);对外部节点无任何强制。
 - 内核不认识"实现来源"概念:code / script / LLM / 远程——全部归结为一个
   `NodeType` 值。
 

@@ -31,7 +31,7 @@ from eidolon_graph_ref.model.graph import GraphDefinition
 from eidolon_graph_ref.model.node_type import InputGroup, NodeType, Policy
 from eidolon_graph_ref.model.ports import DataIn, DataOut
 from eidolon_graph_ref.model.validate import ensure_valid
-from eidolon_graph_ref.primitives import PRIMITIVES
+from eidolon_primitives import PRIMITIVES
 
 
 # ==================================================================== 外部节点包

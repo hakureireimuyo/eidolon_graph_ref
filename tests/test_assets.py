@@ -17,7 +17,7 @@ from eidolon_graph_ref.model.graph import GraphDefinition
 from eidolon_graph_ref.model.node_type import NodeType
 from eidolon_graph_ref.model.ports import DataOut
 from eidolon_graph_ref.model.validate import validate
-from eidolon_graph_ref.primitives import PRIMITIVES
+from eidolon_primitives import PRIMITIVES
 
 from conftest import errors, fired, node_state, quiesces
 from fake_assets import (

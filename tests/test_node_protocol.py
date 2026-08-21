@@ -1,7 +1,7 @@
 """节点协议 ABI 契约测试:内核 ↔ 外部节点(graph-node-protocol.md)。
 
-全部节点为**完全外部定义**——直接构造 NodeType,不经任何内核内部工厂
-(primitives._define);外部实现者可见面只有:model 公开声明类型 +
+全部节点为**完全外部定义**——直接构造 NodeType,不经任何内置包工厂
+(eidolon_primitives._define);外部实现者可见面只有:model 公开声明类型 +
 engine/protocol.py 的 TickContext/TickOutput/InitContext + GraphInstance.build。
 
 每个用例 docstring 引用 graph-node-protocol.md 的 §;与 test_plane_boundaries.py
@@ -21,7 +21,7 @@ from eidolon_graph_ref.model.assets import AssetIn
 from eidolon_graph_ref.model.graph import GraphDefinition, SLOT_DATA, SLOT_TRIGGER
 from eidolon_graph_ref.model.node_type import InputGroup, NodeType, Policy
 from eidolon_graph_ref.model.ports import DataIn, DataOut, TriggerIn
-from eidolon_graph_ref.primitives import PRIMITIVES
+from eidolon_primitives import PRIMITIVES
 
 from conftest import data_port, deliveries, errors, fired, make_world, node_state, quiesces
 from fake_assets import DatabaseCapability, FakeAssetSystem, LockedDatabase
