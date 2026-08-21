@@ -106,14 +106,15 @@ def test_invariant_8_no_implicit_events():
     assert errors(world) == []
 
 
-def test_data_node_cannot_write_signal():
-    """数据节点永远不写信号（声明违规 → error 条目，不产出信号事件）。"""
+def test_undeclared_signal_output_rejected():
+    """写必须声明（2026-08-21 修订，废除"数据节点永不写信号"类别）：
+    产出未声明的 signal_out 端口 → KIND_ERROR，不产出信号事件。"""
     from eidolon_graph_ref.engine.protocol import TickOutput
     from eidolon_graph_ref.model.node_type import InputGroup, NodeType, Policy
     from eidolon_graph_ref.model.ports import DataIn, DataOut
 
     def tick(ctx):
-        return TickOutput(signal_out={"level": True})  # 违规
+        return TickOutput(signal_out={"level": True})  # 未声明 → 违规
 
     bad = NodeType(
         name="BadDataNode",
@@ -126,8 +127,39 @@ def test_data_node_cannot_write_signal():
     g.add_node("bad", "BadDataNode")
     world = make_world(g, {**PRIMITIVES, "BadDataNode": bad})
     world.run([Injection("bad", "in", SLOT_DATA, Kind.DATA, 1)])
-    assert errors(world) == ["数据节点永远不写信号"]
+    assert errors(world) == ["undeclared signal output 'level'"]
     assert len(world.timeline.events) == 1  # 只有注入事件，无信号事件
+
+
+def test_mixed_node_emits_data_and_signal():
+    """输出自由组合（2026-08-21 修订）：一个节点声明 data_out + signal_out，
+    一次执行同时产数据事件与信号事件——不存在"信号节点"类别约束。"""
+    from eidolon_graph_ref.engine.protocol import TickOutput
+    from eidolon_graph_ref.model.node_type import InputGroup, NodeType, Policy
+    from eidolon_graph_ref.model.ports import DataIn, DataOut, SignalOut
+
+    def tick(ctx):
+        # 数据照常传递 + 同时拉高电平：两种输出是同一激活的两个独立事实
+        return TickOutput(data_out={"out": ctx.data_in["in"]}, signal_out={"level": True})
+
+    mixed = NodeType(
+        name="EchoWithSignal",
+        data_in=(DataIn("in"),),
+        data_out=(DataOut("out"),),
+        signal_out=(SignalOut("level"),),
+        groups=(InputGroup("go", inputs=("in",), policy=Policy.ON_ANY_DATA),),
+        tick=tick,
+    )
+    g = GraphDefinition("mixed")
+    g.add_node("m", "EchoWithSignal")
+    g.add_node("sink", "Sink")
+    g.wire("m", "out", "sink", "in")
+    world = make_world(g, {**PRIMITIVES, "EchoWithSignal": mixed})
+    world.run([Injection("m", "in", SLOT_DATA, Kind.DATA, 7)])
+    assert node_state(world, "sink")["last"] == 7  # 数据事件已投递
+    sig = [e for e in world.timeline.events.values() if e.kind is Kind.SIGNAL and e.producer == "m"]
+    assert len(sig) == 1  # 信号事件已产出(未接线 = orphan,但仍有身份)
+    assert errors(world) == []
 
 
 def test_enable_pending_consumed_level_persists():

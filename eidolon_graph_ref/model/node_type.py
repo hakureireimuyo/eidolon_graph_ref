@@ -57,7 +57,7 @@ class NodeType:
     data_out: tuple[DataOut, ...] = ()
     trigger_in: tuple[TriggerIn, ...] = ()
     signal_in: tuple[SignalIn, ...] = ()  # enable（节点级资格）
-    signal_out: tuple[SignalOut, ...] = ()  # 仅信号节点声明
+    signal_out: tuple[SignalOut, ...] = ()  # 与 data_out 自由组合(2026-08-21 修订:无类别约束,写必须声明)
     asset_in: tuple[AssetIn, ...] = ()  # 资产依赖声明(资源平面,与数据/触发/信号并列)
     state_defaults: dict[str, Any] = field(default_factory=dict)
     config_defaults: dict[str, Any] = field(default_factory=dict)
@@ -73,7 +73,7 @@ class NodeType:
 
     @property
     def is_signal_node(self) -> bool:
-        """信号节点：声明 SignalOut。信号逻辑的唯一所在地。"""
+        """派生观察：声明了 SignalOut(可观察面/可视化用,不参与执行约束;2026-08-21 修订)。"""
         return len(self.signal_out) > 0
 
     # ---- 查询 -------------------------------------------------------------

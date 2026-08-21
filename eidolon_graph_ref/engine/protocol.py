@@ -5,7 +5,7 @@
 - ctx.data_in 只含本组已解析输入（资格关闭的端口以默认属性参与）
 - ctx.state 为当前状态深拷贝；ctx.config 只读
 - TickOutput.data_out：不写即不投递（没有隐式输出信号）
-- TickOutput.signal_out：仅信号节点可写（数据节点触碰 = 声明违规）
+- TickOutput.signal_out：产出未声明端口 = 声明违规（data/signal 对称，2026-08-21 修订）
 - Readiness 判定、pending 消费、输出投递、状态提交是基类 final 语义，
   节点只重载各组处理逻辑
 - init(ctx: InitContext) -> dict | None：构建期初始化钩子（graph-node-protocol.md §7），
@@ -43,7 +43,7 @@ class TickOutput:
     # 值域 = Value（可复制/可序列化）：Capability 不得进入状态/传播平面
     # （2026-08-20 裁定；内核在提交与产出时校验，违者 KIND_ERROR）
     data_out: dict[str, Any] = field(default_factory=dict)  # 输出端口名 → 值（不写即不投递）
-    signal_out: dict[str, bool] = field(default_factory=dict)  # 仅信号节点可写
+    signal_out: dict[str, bool] = field(default_factory=dict)  # 电平输出：与 data_out 自由组合,写必须声明
     state: dict[str, Any] = field(default_factory=dict)  # 状态变更字段增量
 
 

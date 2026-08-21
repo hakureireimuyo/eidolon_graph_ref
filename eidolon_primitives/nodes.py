@@ -203,7 +203,7 @@ def latch() -> NodeType:
 def data_to_signal() -> NodeType:
     """数据 → 信号显式转换(控制流构造):读数据值算电平,写 SignalOut。
 
-    信号节点 = 声明 SignalOut 的节点;数据节点永远不写信号。
+    声明 SignalOut 的节点产出 Signal Event;声明了什么就能产什么(写必须声明)。
     """
 
     def tick(ctx: TickContext) -> TickOutput:

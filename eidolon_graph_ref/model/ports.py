@@ -8,7 +8,9 @@
 - DataIn：一格缓存(Replace 默认 / Append 声明) + pending；可声明资格槽(qualified)。
 - TriggerIn：函数调用入口(激活请求)。Data Event = 载荷 + 激活；Signal Event = 激活。
 - SignalIn：节点级资格 enable（level + pending）。
-- SignalOut：仅信号节点声明。数据节点(不声明 SignalOut)永不触碰信号。
+- SignalOut：信号输出端口声明。与 DataOut 自由组合——产数据还是产信号由
+  节点需求决定；唯一约束 = 写必须声明(未声明端口产出 = KIND_ERROR,
+  2026-08-21 修订)。
 """
 
 from __future__ import annotations
@@ -69,7 +71,7 @@ class SignalIn:
 
 @dataclass(frozen=True)
 class SignalOut:
-    """信号输出端口声明。仅信号节点声明：读输入信号、写输出信号。
+    """信号输出端口声明(2026-08-21 修订：与 DataOut 自由组合,无类别约束)。
 
     电平输出 = Signal Event；未写保持原电平。
     """

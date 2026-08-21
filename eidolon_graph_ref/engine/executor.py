@@ -341,11 +341,8 @@ class Executor:
         ntype = self.types[inst.definition.nodes[nid].type]
         if not out.signal_out:
             return
-        if not ntype.is_signal_node:
-            inst.timeline.record(
-                Entry(run=inst.run_no, kind=KIND_ERROR, dst_node=nid, message="数据节点永远不写信号")
-            )
-            return
+        # 写必须声明(2026-08-21 修订,废除"数据节点永不写信号"类别):
+        # data_out / signal_out 任意组合声明,产出未声明端口 = KIND_ERROR。
         declared = {p.name for p in ntype.signal_out}
         for port, level in out.signal_out.items():
             if port not in declared:

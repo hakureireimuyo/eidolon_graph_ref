@@ -67,8 +67,9 @@ Large Kernel
 - **执行**：epoch = run(events)；注入序 + 源节点声明序播种 → worklist 脏传播
   （投递即唤醒、深度优先、队列遍历非递归）→ 每组每轮至多一次（NodeTurn 预算）
   → 反馈环跨轮迭代 → 队列排空即静止。异常 = 不产出 + 错误条目 + pending 保留重试。
-- **输出侧无隐式信号**：不写即不投递；没有 Event = 没有事实发生；数据节点
-  永不写信号（声明违规报错）；信号节点（声明 SignalOut）显式产生 Signal Event。
+- **输出侧无隐式信号**：不写即不投递；没有 Event = 没有事实发生；数据/信号
+  输出**自由组合**（产什么由节点需求决定），唯一约束 = 写必须声明（未声明
+  端口产出 = KIND_ERROR，2026-08-21 修订）。
 - **确定性**：同一图、同一输入序列 → 同一时间线、同一状态。
 - **资产层(资源平面)**：见 `docs/graph-assets.md` 与 `docs/graph-asset-protocols.md`。
   节点是编排者，资产是能力实现者，资产系统是唯一工厂与所有者；
@@ -105,6 +106,10 @@ Large Kernel
    四入口以 deepcopy 探针校验（只校验不复制，零拷贝保持）。
 10. **共享资产调用顺序不构成 Runtime 语义**（2026-08-20）：内核不承诺
     声明序；顺序敏感性与可共享性由资产系统与编排负责。
+11. **输出自由组合**（2026-08-21 修订）：废除「数据节点永不写信号」类别
+    约束——data_out / signal_out 任意组合声明，一次执行可同时产数据与信号
+    事件；唯一约束 = 写必须声明（未声明端口产出 = KIND_ERROR）；「信号
+    节点」降级为派生观察。
 
 ## 范围
 
@@ -156,7 +161,7 @@ docs/graph-node-protocol.md）、平面边界攻击测试套件、语义测试�
 ```bash
 cd kernel/eidolon_graph_ref
 uv sync                      # 安装 dev 依赖（pytest）
-uv run pytest                # 116 个语义 + 边界测试
+uv run pytest                # 117 个语义 + 边界测试
 uv run python examples/validation_chain.py   # 控制台观察事件传播
 uv run python examples/external_node.py      # 外部节点包端到端(节点协议 ABI)
 ```

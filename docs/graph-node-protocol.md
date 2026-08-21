@@ -1,6 +1,8 @@
 # 节点协议(内核 ↔ 外部节点 ABI)
 
-> 状态:已裁定 + 已验证(2026-08-21,§11 边界 14 例全部通过;裁定修订:新增 §7 init 构建期初始化钩子)
+> 状态:已裁定 + 已验证(2026-08-21,§11 边界 14 例全部通过;裁定修订:
+> ①新增 §7 init 构建期初始化钩子;②废除"数据节点永不写信号"类别——
+> data_out / signal_out 自由组合,写必须声明)
 >
 > 定位:本文档锁定节点协议的语义裁定——内核与外部/自定义节点实现之间的
 > 唯一契约(ABI)。它是已冻结内核语义的**暴露面**,不是第二套内核。最小
@@ -55,7 +57,7 @@
 | `data_out` | `DataOut(name)` | 数据输出;执行时写入即投递 |
 | `trigger_in` | `TriggerIn(name)` | 激活请求入口(函数调用入口) |
 | `signal_in` | `SignalIn(name)` | 节点级资格 `enable`(持续电平门控) |
-| `signal_out` | `SignalOut(name)` | 信号输出;**仅信号节点声明**(信号逻辑的唯一所在地) |
+| `signal_out` | `SignalOut(name)` | 信号输出;与 data_out **自由组合**——产数据还是产信号由节点需求决定(2026-08-21 修订) |
 | `asset_in` | `AssetIn(name, type)` | 资产依赖声明(§4,资源平面) |
 | `state_defaults` | 状态字段表(带默认值) | 实例跨轮事实的唯一存储;提交超出此表的字段 = 违规 |
 | `config_defaults` | 配置字段表 | 编辑期覆盖,运行时只读 |
@@ -64,7 +66,8 @@
 | `init` | `init(ctx) -> dict | None` | 构建期初始化钩子(§7,2026-08-21 裁定修订) |
 
 派生判定:`is_source`(无输入组 → 每 epoch 按声明序播种执行一次,
-group="step");`is_signal_node`(声明 `signal_out`)。
+group="step");`is_signal_node`(声明 `signal_out`——纯派生观察,
+不参与执行约束,2026-08-21 修订)。
 
 **Readiness 策略**(`Policy`,组触发条件 = pending 如何聚合为 Readiness):
 
@@ -114,8 +117,8 @@ ABI 强制**——启用节点级门控与否由节点声明自行决定。
 3. **消费**:组执行成功后消费本轮 pending(value / level 保持,等待新事件)。
 4. **状态提交**:`TickOutput.state` 增量合并进节点状态;未知字段 →
    KIND_ERROR + 丢弃该字段;不可复制值 → KIND_ERROR + 拒绝该字段。
-5. **产出投递**:data_out 写即投递(不写即不投递,无隐式事件);signal_out
-   仅信号节点可写(§5)。
+5. **产出投递**:data_out / signal_out 写即投递(不写即不投递,无隐式事件);
+   写必须声明(§5)。
 
 **错误约定(执行期)**:`tick` 抛异常 → 记录 KIND_ERROR + `inst.log`,**不产生
 任何输出、不消费 pending**;本轮 NodeTurn 已消耗(同 epoch 不重试),下一
@@ -157,9 +160,10 @@ epoch 被唤醒后重试。节点可以安全地依赖此约定:失败是"这次
   deliver → consume;LOW 自消费路径同样先标记本次投递
   (`tests/test_semantics_matrix.py::test_low_self_consume_marks_delivery_consumed`)。数据与信号在调度层面对称:都不拥有
   "触发权",只改变端口状态并唤醒节点。
-- **输出提交**:不写即不投递(没有隐式输出事件);写入未声明的 data_out /
-  signal_out 端口 → KIND_ERROR;数据节点写 signal_out → KIND_ERROR
-  ("数据节点永远不写信号")。
+- **输出提交**:不写即不投递(没有隐式输出事件);**写必须声明**
+  (2026-08-21 修订,废除"数据节点永不写信号"类别)——data_out / signal_out
+  任意组合声明,产出未声明端口 → KIND_ERROR("undeclared data/signal
+  output",data/signal 对称)。
 - **值域**:State/Data/Event 载荷的值域 = Value(可复制/可序列化);Capability
   不得进入任何传播/状态平面。内核在三个入口以 deepcopy 探针校验(只校验
   不复制,传输零拷贝):状态提交、数据产出、宿主注入。
@@ -309,6 +313,7 @@ result = GraphInstance.build(definition, types, asset_resolver=host_resolver)
 | 调用顺序 | 共享资产调用顺序不构成 Runtime 语义(graph-asset-protocols.md §11,2026-08-20) |
 | 执行时长 | 不属于图传播语义;不构成事件排序依据(§6,2026-08-21) |
 | enable | 不强制;未连接 = 结构常量 True(§2) |
+| 信号产出 | 与数据产出**自由组合**:data_out / signal_out 任意组合声明,一次执行可同时产数据与信号事件;唯一约束 = 写必须声明;"信号节点"二元类别废除,is_signal_node 降级为派生观察(2026-08-21 修订) |
 | 注册 | 内核 registry-agnostic;宿主传 types(§8) |
 | 初始化 | 仅构建期 init 一次;无运行时生命周期钩子(§7) |
 
