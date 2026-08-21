@@ -21,6 +21,7 @@ from ..model.ports import APPEND
 from .event import Injection
 from .executor import Executor
 from .port_state import DataPortState, SignalPortState, TriggerPortState
+from .protocol import InitContext
 from .timeline import Timeline
 
 
@@ -59,6 +60,7 @@ class GraphInstance:
         definition: GraphDefinition,
         types: dict[str, NodeType],
         assets: dict[str, dict[str, Any]] | None = None,
+        init_states: dict[str, dict[str, Any]] | None = None,
         *,
         _internal: bool = False,
     ):
@@ -82,6 +84,8 @@ class GraphInstance:
         self.assets: dict[str, dict[str, Any]] = {
             nid: dict(per_node) for nid, per_node in (assets or {}).items()
         }
+        # init 修订后的初始状态(graph-node-protocol.md §7)：仅构建期产生，_build 按节点合入
+        self._init_states: dict[str, dict[str, Any]] = dict(init_states or {})
         # 端口状态（按 (节点, 端口名) 索引；只有"已连接"的动态端口才创建 Signal 状态）
         self.data_states: dict[str, dict[str, DataPortState]] = {}
         self.qual_states: dict[str, dict[str, SignalPortState]] = {}  # 资格槽
@@ -177,7 +181,46 @@ class GraphInstance:
 
         if errors:
             return BuildReport(ok=False, errors=tuple(errors))
-        return BuildReport(ok=True, errors=(), instance=cls(definition, types, assets, _internal=True))
+
+        # 2.5 init 构建期初始化钩子(2026-08-21 裁定修订,graph-node-protocol.md §7)
+        # 资产解析后、实例构造前,每节点至多一次;初始状态增量合并于
+        # state_defaults。默认 None = 无行为变化。失败 = 结构前提失败 →
+        # BuildReport error(与执行期 KIND_ERROR 分层)。
+        init_states: dict[str, dict[str, Any]] = {}
+        for nid in definition.node_order():
+            ntype = types.get(definition.nodes[nid].type)
+            if ntype is None or ntype.init is None:
+                continue
+            spec = definition.nodes[nid]
+            merged_config = {**ntype.config_defaults, **spec.config}  # 与 _build 的 configs 同源
+            ictx = InitContext(config=merged_config, assets=dict(assets.get(nid, {})))
+            try:
+                delta = ntype.init(ictx)
+            except Exception as exc:
+                errors.append(f"node {nid!r}: init raised {type(exc).__name__}: {exc}")
+                continue
+            if delta is None:
+                continue  # 无增量:状态 = state_defaults(默认路径)
+            unknown = set(delta) - set(ntype.state_defaults)
+            if unknown:
+                errors.append(f"node {nid!r}: init wrote undeclared state fields: {sorted(unknown)}")
+                continue
+            invalid: list[str] = []
+            for field, value in delta.items():
+                try:
+                    deepcopy(value)  # 值域探针:与 config 探针同判据
+                except Exception:
+                    invalid.append(field)
+            if invalid:
+                errors.append(f"node {nid!r}: init wrote non-copyable values to state fields: {sorted(invalid)}")
+                continue
+            init_states[nid] = {**deepcopy(ntype.state_defaults), **deepcopy(delta)}
+
+        if errors:
+            return BuildReport(ok=False, errors=tuple(errors))
+        return BuildReport(
+            ok=True, errors=(), instance=cls(definition, types, assets, init_states, _internal=True)
+        )
 
     def _build(self) -> None:
         from ..model.validate import resolve_slots
@@ -190,7 +233,11 @@ class GraphInstance:
         for nid, spec in self.definition.nodes.items():
             ntype = self.types[spec.type]
             self.configs[nid] = {**ntype.config_defaults, **spec.config}
-            self.node_states[nid] = deepcopy(ntype.state_defaults)
+            self.node_states[nid] = (
+                deepcopy(self._init_states[nid])
+                if nid in self._init_states
+                else deepcopy(ntype.state_defaults)
+            )
 
             data_states: dict[str, DataPortState] = {}
             qual_states: dict[str, SignalPortState] = {}

@@ -45,8 +45,11 @@ class NodeType:
     - groups：输入组 = 函数；每组执行时只读本组输入，组间数据经节点状态传递
     - asset_in：资产依赖声明（资源平面）；运行时经 ctx.assets[槽名] 使用——
       只有使用权，没有所有权（graph-assets.md §2-5）
-    - tick：各组处理逻辑（唯一可重载点）；Readiness 判定、pending 消费、
+    - tick：各组处理逻辑（运行时唯一可重载点）；Readiness 判定、pending 消费、
       输出投递、状态提交是基类 final 语义，节点不可触碰
+    - init：构建期初始化钩子（graph-node-protocol.md §7，2026-08-21 裁定修订）：
+      init(ctx) -> dict | None，资产解析后、实例构造前调用一次；返回初始
+      状态增量合并于 state_defaults；无运行时事件语义
     """
 
     name: str
@@ -60,6 +63,7 @@ class NodeType:
     config_defaults: dict[str, Any] = field(default_factory=dict)
     groups: tuple[InputGroup, ...] = ()
     tick: Any = None  # tick(ctx) -> TickOutput（实现绑定，Python 函数/方法）
+    init: Any = None  # init(ctx: InitContext) -> dict | None（构建期初始化钩子，§7 裁定修订）
 
     # ---- 派生判定 ---------------------------------------------------------
     @property
@@ -114,6 +118,7 @@ class NodeType:
                 {"name": g.name, "inputs": list(g.inputs), "triggers": list(g.triggers), "policy": g.policy.value}
                 for g in self.groups
             ],
+            "has_init": self.init is not None,
             "is_source": self.is_source,
             "is_signal_node": self.is_signal_node,
         }

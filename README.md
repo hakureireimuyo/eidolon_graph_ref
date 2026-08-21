@@ -39,6 +39,7 @@ Large Kernel
 | 执行语义(事件/传播/Readiness/信号) | **已稳定** | 既有语义测试,不再重新设计 |
 | 协议与所有权(Node/Asset/AssetSystem/Runtime 边界) | **已稳定** | docs/graph-assets.md + graph-asset-protocols.md + 边界测试 |
 | 跨平面抽象(Value/Capability 分离) | **已稳定** | 值域裁定 + 12 行越权矩阵 + 入口探针 |
+| 节点协议(内核 ↔ 外部节点 ABI,含 init 钩子) | **已稳定** | docs/graph-node-protocol.md + ABI 测试 |
 | Snapshot/Replay、真实 AssetSystem | 实现缺口 | 按已裁定规格实现,非语义问题 |
 | 并发语义 | 未定义 | 不构成当前内核的不稳定 |
 | 大规模压力/性能 | 未验证 | 属工程验证,不属于语义裁定 |
@@ -109,8 +110,10 @@ Large Kernel
 
 **包含**：图模型、端口/资格语义、事件传播执行引擎、时间线+事件档案、
 连线校验（kind 匹配 + 扇入禁止）、10 个验证原语、资产层（AssetIn/AssetRef/
-bind_asset/构建期解析/Capability 注入，假 AssetSystem 驱动）、平面边界
-攻击测试套件、语义测试套件、控制台渲染。
+bind_asset/构建期解析/Capability 注入，假 AssetSystem 驱动）、节点协议
+ABI（Activation/Event 执行契约 + init 构建期钩子 + 外部节点 ABI 测试，
+docs/graph-node-protocol.md）、平面边界攻击测试套件、语义测试套件、
+控制台渲染。
 
 **明确排除**（ChatGPT 文档）：LLM、真实 Asset 系统（资产管理器）、
 持久化/快照（Snapshot/Replay 机制）、脚本节点、前后端服务、死等拓扑诊断、
@@ -152,8 +155,9 @@ bind_asset/构建期解析/Capability 注入，假 AssetSystem 驱动）、平�
 ```bash
 cd kernel/eidolon_graph_ref
 uv sync                      # 安装 dev 依赖（pytest）
-uv run pytest                # 99 个语义 + 边界测试
+uv run pytest                # 113 个语义 + 边界测试
 uv run python examples/validation_chain.py   # 控制台观察事件传播
+uv run python examples/external_node.py      # 外部节点包端到端(节点协议 ABI)
 ```
 
 ## 结构
@@ -164,6 +168,7 @@ eidolon_graph_ref/           # 内核核心包（零第三方依赖）
 ├── engine/                  # event / port_state / protocol / timeline / executor / instance
 ├── primitives/              # 10 个验证原语
 └── console.py               # 控制台渲染（时间线 + 事件档案 + 节点状态）
-examples/validation_chain.py # 组合链演示：Source→Buffer→Join→Split→Latch→DataToSignal→SignalToData→Sink
+docs/                        # 裁定文档(graph-assets / graph-asset-protocols / graph-node-protocol)
+examples/                    # validation_chain.py 组合链演示;external_node.py 外部节点包演示
 tests/                       # 语义测试（建模正确性）
 ```

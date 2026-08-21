@@ -8,6 +8,8 @@
 - TickOutput.signal_out：仅信号节点可写（数据节点触碰 = 声明违规）
 - Readiness 判定、pending 消费、输出投递、状态提交是基类 final 语义，
   节点只重载各组处理逻辑
+- init(ctx: InitContext) -> dict | None：构建期初始化钩子（graph-node-protocol.md §7），
+  资产解析后、实例构造前调用一次；返回初始状态增量合并于 state_defaults
 """
 
 from __future__ import annotations
@@ -43,3 +45,17 @@ class TickOutput:
     data_out: dict[str, Any] = field(default_factory=dict)  # 输出端口名 → 值（不写即不投递）
     signal_out: dict[str, bool] = field(default_factory=dict)  # 仅信号节点可写
     state: dict[str, Any] = field(default_factory=dict)  # 状态变更字段增量
+
+
+@dataclass
+class InitContext:
+    """节点构建期初始化上下文（graph-node-protocol.md §7，2026-08-21 裁定修订）。
+
+    独立于 TickContext：构建期一次性场景，无运行时事件语义。
+    config = 合并后的配置（config_defaults ∪ spec.config，与 ctx.config 同源）；
+    assets = 本节点已解析的能力表（浅拷贝，键集合 = asset_in 声明，
+    声明即必须——恒为非 None 槽位）。
+    """
+
+    config: dict[str, Any]
+    assets: dict[str, Any] = field(default_factory=dict)
