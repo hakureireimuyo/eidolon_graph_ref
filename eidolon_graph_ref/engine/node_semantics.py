@@ -159,4 +159,11 @@ class NodeSemantics:
             )
         data_ready = all(cls.data_ready(inst, node_id, port) for port in group.inputs)
         trigger_ready = any(inst.trigger_states[node_id][port].pending for port in group.triggers) if group.triggers else True
-        return data_ready and trigger_ready
+        if not trigger_ready:
+            return False
+        if not group.triggers:
+            # 裁定 16:无触发器组要求新事实——至少一个输入 pending 才触发。
+            # 全静态回退值不构成触发,防止"永远 ready"契约借壳复活(裁定 9)。
+            if not any(cls._input_state(inst, node_id, p).pending for p in group.inputs):
+                return False
+        return data_ready

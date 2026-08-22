@@ -90,6 +90,7 @@ Injection → Event → Wire → Port → [端口模式判定] → Group Readine
 | 13 | 端口分区 | 输入端口唯一归属 Group;事件系统 Port-centric 零改动(撤回 (Group,Port) 投影与 consumed_by 组维度) |
 | 14 | Signal 归位 | Signal 退出 Readiness;= DataIn 的数据来源选择/激活模式控制(见 §6);SIGNAL/SIGNAL_HIGH 叶条件撤销 |
 | 15 | Signal 绑定细则 | 未激活信号 = 默认数据有效;SignalIn↔DataIn 严格一对一;未绑定 SignalIn 可单独存在;LOW = 不等待 + 回默认数据 |
+| 16 | 无触发器组要求新事实 | 缺省 readiness 下,无触发器组须至少一个输入 pending 才触发;全静态回退值不再在任意节点唤醒时连带触发(裁定 9 精神的延伸;DSL v2 迁移实测暴露,2026-08-22) |
 
 ## 4. 声明层
 

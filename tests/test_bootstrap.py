@@ -20,10 +20,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import eidolon_graph_ref
 from eidolon_graph_ref.engine.event import Injection, Kind
-from eidolon_graph_ref.engine.protocol import TickOutput
+from eidolon_graph_ref.engine.protocol import GroupOutput
 from eidolon_graph_ref.model.graph import GraphDefinition, SLOT_TRIGGER
-from eidolon_graph_ref.model.node_type import NodeType
-from eidolon_graph_ref.model.ports import DataOut
+from eidolon_graph_ref.model.node_type import Group, NodeType
+from eidolon_graph_ref.model.ports import DataOut, TriggerIn
 from eidolon_primitives import PRIMITIVES
 
 from conftest import make_world
@@ -61,30 +61,30 @@ def test_builtin_and_external_twin_indistinguishable():
 
     def twin_tick(ctx):
         count = ctx.state["count"]
-        return TickOutput(data_out={"out": count}, state={"count": count + ctx.config["step"]})
+        return GroupOutput(data_out={"tick": count}, state={"count": count + ctx.config["step"]})
 
     TwinSource = NodeType(
         name="TwinSource",
-        data_out=(DataOut("out"),),
+        data_out=(DataOut("tick"),),
+        trigger_in=(TriggerIn("tick.trigger"),),
         state_defaults={"count": 0},
-        config_defaults={"step": 1},
-        tick=twin_tick,
+        groups=(Group("tick", triggers=("tick.trigger",), outputs=("tick",), defaults={"step": 1}, handler=twin_tick),),
     )
 
     def build_graph(type_name: str) -> GraphDefinition:
         g = GraphDefinition("twin")
-        g.add_node("src", type_name, step=2)
+        g.add_node("src", type_name, config={"groups": {"tick": {"step": 2}}})
         g.add_node("buf", "Buffer")
         g.add_node("sink", "Sink")
-        g.wire("src", "out", "buf", "put")
-        g.wire("buf", "out", "sink", "in")
+        g.wire("src", "tick", "buf", "put.item")
+        g.wire("buf", "flush", "sink", "consume.value")
         return g
 
     def run_and_snapshot(type_name: str, types) -> tuple:
         world = make_world(build_graph(type_name), types)
-        world.run()
-        world.run()
-        world.run([Injection("buf", "flush", SLOT_TRIGGER, Kind.SIGNAL, True)])
+        world.run([Injection("src", "tick.trigger", SLOT_TRIGGER, Kind.SIGNAL, True)])
+        world.run([Injection("src", "tick.trigger", SLOT_TRIGGER, Kind.SIGNAL, True)])
+        world.run([Injection("buf", "flush.trigger", SLOT_TRIGGER, Kind.SIGNAL, True)])
         obs = world.observable_state()
         for view in obs.values():
             view.pop("type", None)  # 类型名 = 宿主注册表概念,非内核事实
@@ -93,5 +93,4 @@ def test_builtin_and_external_twin_indistinguishable():
     builtin_snap = run_and_snapshot("Source", {**PRIMITIVES})
     external_snap = run_and_snapshot("TwinSource", {**PRIMITIVES, "TwinSource": TwinSource})
     assert builtin_snap == external_snap  # 时间线 + 状态逐位一致
-    # epoch 3 内注入先于源节点播种:flush 时 buf 已累积 [0, 2](4 是 flush 后播种的)
     assert builtin_snap[0]["sink"]["state"]["last"] == [0, 2]  # 运行确有事实发生
