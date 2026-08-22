@@ -2,7 +2,9 @@
 
 ``NodeDefinition`` classes are compile-time declarations only.  The graph
 kernel receives the compiled ``NodeType`` value and never constructs a node
-object or consults this module while executing a graph.
+object or consults this module while executing a graph.  ``NodeType`` is the
+compile target of this front-end: the semantic IR (Node ABI) the kernel
+executes (docs/graph-node-protocol.md §1.0).
 
 Capability ownership (frozen, docs/graph-node-protocol.md §2.0): a concrete
 node definition is a declaration entry point, never a behavior supplier for
@@ -97,32 +99,24 @@ class NodeDefinitionMeta(type):
                     readiness=spec.readiness,
                 )
             )
-        node_type = NodeType(
-            name=namespace.get("type_name", cls.__name__),
-            data_in=tuple(getattr(cls, "data_in", ())),
-            data_out=tuple(getattr(cls, "data_out", ())),
-            trigger_in=tuple(getattr(cls, "trigger_in", ())),
-            signal_in=tuple(getattr(cls, "signal_in", ())),
-            signal_out=tuple(getattr(cls, "signal_out", ())),
-            asset_in=tuple(getattr(cls, "asset_in", ())),
-            state_defaults=dict(getattr(cls, "state_defaults", {})),
-            init_defaults=dict(getattr(cls, "init_defaults", {})),
-            groups=tuple(compiled),
-            tags=tuple(getattr(cls, "tags", ())),
-            init=getattr(cls, "init", None),
-        )
-        _assert_protocol_valid(cls, node_type)
+        try:
+            node_type = NodeType(
+                name=namespace.get("type_name", cls.__name__),
+                data_in=tuple(getattr(cls, "data_in", ())),
+                data_out=tuple(getattr(cls, "data_out", ())),
+                trigger_in=tuple(getattr(cls, "trigger_in", ())),
+                signal_in=tuple(getattr(cls, "signal_in", ())),
+                signal_out=tuple(getattr(cls, "signal_out", ())),
+                asset_in=tuple(getattr(cls, "asset_in", ())),
+                state_defaults=dict(getattr(cls, "state_defaults", {})),
+                init_defaults=dict(getattr(cls, "init_defaults", {})),
+                groups=tuple(compiled),
+                tags=tuple(getattr(cls, "tags", ())),
+                init=getattr(cls, "init", None),
+            )
+        except ValueError as e:
+            raise DefinitionError(f"{cls.__name__}: {e}") from e
         return node_type
-
-
-def _assert_protocol_valid(cls: type, node_type: NodeType) -> None:
-    """Run declaration checks at source compilation, not graph construction."""
-
-    from .validate import _type_errors
-
-    errors = _type_errors(node_type)
-    if errors:
-        raise DefinitionError(f"{cls.__name__}: " + "; ".join(errors))
 
 
 class NodeDefinition(metaclass=NodeDefinitionMeta):

@@ -53,20 +53,19 @@
 > NodeDefinition 基类提供。"具体节点禁止二次继承"只是这条原则的一条推论,
 > 不是原因。
 
-**两层结构:声明层与执行层。**
+**三层架构:表达语言 → 语义 IR → 执行器。**
 
 ```text
-                NodeDefinition(声明入口 / DSL)
-                          │
-                          │ 声明资格(class MyNode(NodeDefinition))
+            Node Definition DSL(受约束的表达语言)
+                          │ 函数签名即组协议(@group / this / 注解词汇)
                           ▼
-                  Concrete Definition(声明 ports / groups / 资产 / init / handler)
+                    NodeDefinition(声明资格:编译入口)
                           │
-                          │ compile(类创建期)
+                          │ compile(类创建期;AST / 类型解析 / 声明校验属编译过程)
                           ▼
-                       NodeType(冻结声明 + 不透明 handler callable)
+                       NodeType(语义 IR / Node ABI:已解析的节点契约)
                           │
-                          │ 被 Kernel 解释
+                          │ 被 Kernel 解释(IR 是内核的唯一输入形态)
                           ▼
                     NodeSemantics(Kernel final:readiness / consume /
                           │        解释矩阵 / 静态动态吸收 / 组执行)
@@ -78,11 +77,23 @@
 fire() / receive()"这种事——而是**声明资格**:编译器把声明编译成
 `MyNode.TYPE`,Kernel 再对 TYPE 统一施加运行语义。运行时不存在节点对象。
 
+**NodeType 的独立身份:语义 IR。**
+
+- NodeType 是 DSL 的编译目标,不是"缓存后的 Python class"——它是脱离
+  Python 后依然成立的契约描述:冻结 dataclass,可序列化、可 to_dict,
+  编辑器平面与运行时平面共享同一份 IR。
+- 运行时执行的是语义,不是语法:内核不重新理解函数签名,只查询已解析的
+  inputs / triggers / outputs / readiness / defaults / handler。
+- 判断标准:任何存在于 DSL 与 NodeType 之间的东西,必须回答"它是否具有
+  独立的语义职责"。字符串中转之类的临时表示应当消失;AST、类型解析、
+  声明校验可以作为编译过程存在,但它们不是 ABI。
+
 **所有权表:**
 
 | 东西 | 所有者 | 作用 |
 |---|---|---|
 | 节点声明协议 | `NodeDefinition` | 规定什么样的 Python 定义可被编译成 `NodeType` |
+| 语义 IR(Node ABI) | `NodeType` | 已解析的节点契约;DSL 的编译目标、内核的唯一输入、编辑器的序列化边界 |
 | 普遍执行语义 | Kernel / `NodeSemantics` | 规定任何合法 `NodeType` 的运行规则,不可重载 |
 | 具体领域行为 | Concrete Node | handler 如何根据自己的状态计算输出 |
 | 共享领域行为 | Definition Material | 普通类(不编译 TYPE),被多个具体节点复用(§2.0) |
@@ -117,6 +128,19 @@ Event → (address, payload) → port state → group readiness
 其余是内核统一语义。共享领域行为属于独立 Definition Material,不属于任何
 具体节点——这也是 `BufferMaterial` 方向合理的依据:材料提供节点定义材料,
 但不能变成第二套 Kernel 语义。
+
+**为新子系统建立的设计清单(本子系统的经验沉淀,2026-08-22)。**
+
+本子系统从"内核语义 → NodeType 随实现沉淀 → 事后发现表达层"的路径,
+沉淀为一条方法论:设计任何新的声明体系(Asset Definition / Character
+Definition 等)时,从第一天就把**语义模型**与**表达语言**并列为两个
+独立设计维度:
+
+1. 它的运行语义是什么?
+2. 它的稳定 IR 是什么?
+3. 它的合法表达语言是什么?
+4. 哪些非法状态应该由语言直接消除?
+5. 哪些问题必须留给运行时处理?
 
 ## 2. Node 定义层
 
@@ -387,7 +411,8 @@ NodeTurn 预算、handler 调用、输出校验与扇出投递——不含任何
 结构校验(validate:类型存在 / config 三节白名单 / 连线 kind / 扇入 / 绑定结构)
     → config 值域探针(三节递归,Value:可复制)
     → 声明校验(§2.2-§2.5:端口归属分区、handler 非空、readiness 引用、
-      空组、signal 绑定 1:1)
+      空组、signal 绑定 1:1)——内联于 NodeType 构造(构造即校验,
+      任何构造路径不可绕过;DSL 编译期转 DefinitionError)
     → eager 资产解析(逐节点按声明序:绑定 lookup → resolve → isinstance → 注入)
     → init(§7,config = init_effective,每节点至多一次)
     → 实例构造(失败则 BuildReport error,不存在可 run() 的半成品实例)

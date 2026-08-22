@@ -1,4 +1,4 @@
-"""图模型：节点类型、端口声明、图定义与连线校验。"""
+"""图模型:语义 IR(NodeType/Group)、端口声明、声明编译(DSL 前端)、图定义与连线校验。"""
 
 from .assets import AssetIn, AssetRef
 from .graph import GraphDefinition, NodeSpec, Wire, SLOT_DATA, SLOT_TRIGGER, SLOT_SIGNAL

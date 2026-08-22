@@ -47,6 +47,25 @@ def test_definition_classes_cannot_be_instantiated():
     with pytest.raises(TypeError, match="compile-time declarations"):
         Echo()
 
+def test_dsl_rejects_input_shared_across_groups():
+    """IR 不变式在 DSL 编译期生效:共享输入端口 = DefinitionError(错误前置到 import 时)。"""
+    with pytest.raises(DefinitionError, match="belongs to both"):
+        class Bad(NodeDefinition):
+            type_name = "Bad"
+            data_in = (DataIn("a"),)
+            groups = (
+                GroupSpec(name="g1", inputs=("a",), handler="h1"),
+                GroupSpec(name="g2", inputs=("a",), handler="h2"),
+            )
+
+            @staticmethod
+            def h1(ctx):
+                return GroupOutput()
+
+            @staticmethod
+            def h2(ctx):
+                return GroupOutput()
+
 
 def test_handlers_must_be_static_and_have_exactly_one_argument():
     with pytest.raises(DefinitionError, match="@staticmethod"):

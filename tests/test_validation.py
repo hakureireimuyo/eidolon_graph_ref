@@ -100,3 +100,53 @@ def test_config_field_validation():
     g3 = GraphDefinition("cfg3")
     g3.add_node("stod", "SignalToData", config={"ports": {"pass_value.x": "STATIC_DEFAULT"}})
     assert validate(g3, PRIMITIVES).ok
+
+# ==================================================================== IR 契约不变式(构造即校验)
+# NodeType 结构性保证端口唯一归属——任何构造路径(DSL、手工构造)都不可产生二义契约。
+from eidolon_graph_ref.model import DataIn, DataOut, Group, NodeType, TriggerIn
+
+
+def test_ir_rejects_input_shared_across_groups():
+    with pytest.raises(ValueError, match="belongs to both"):
+        NodeType(
+            name="X",
+            data_in=(DataIn("a"),),
+            groups=(
+                Group(name="g1", inputs=("a",), handler=lambda ctx: None),
+                Group(name="g2", inputs=("a",), handler=lambda ctx: None),
+            ),
+        )
+
+
+def test_ir_rejects_trigger_shared_across_groups():
+    with pytest.raises(ValueError, match="trigger .* belongs to both"):
+        NodeType(
+            name="X",
+            trigger_in=(TriggerIn("t"),),
+            groups=(
+                Group(name="g1", triggers=("t",), handler=lambda ctx: None),
+                Group(name="g2", triggers=("t",), handler=lambda ctx: None),
+            ),
+        )
+
+
+def test_ir_rejects_output_shared_across_groups():
+    with pytest.raises(ValueError, match="output .* belongs to both"):
+        NodeType(
+            name="X",
+            data_in=(DataIn("a"), DataIn("b")),
+            data_out=(DataOut("o"),),
+            groups=(
+                Group(name="g1", inputs=("a",), outputs=("o",), handler=lambda ctx: None),
+                Group(name="g2", inputs=("b",), outputs=("o",), handler=lambda ctx: None),
+            ),
+        )
+
+
+def test_ir_rejects_unassigned_input():
+    with pytest.raises(ValueError, match="not assigned to a group"):
+        NodeType(
+            name="X",
+            data_in=(DataIn("a"), DataIn("b")),
+            groups=(Group(name="g1", inputs=("b",), handler=lambda ctx: None),),
+        )

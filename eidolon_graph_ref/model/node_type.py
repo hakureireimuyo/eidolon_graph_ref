@@ -1,10 +1,31 @@
-"""Group-centric node declaration ABI."""
+"""Eidolon 语义 IR(Node ABI):已解析的节点契约。
+
+NodeType 是节点定义语言(DSL v2)的编译目标,也是内核的唯一输入形态:
+
+- 脱离 Python 后依然成立的契约描述(冻结 dataclass,可序列化、可 to_dict),
+  编辑器平面与运行时平面共享同一份 IR;
+- 运行时执行的是语义,不是语法——内核只查询已解析的 inputs / triggers /
+  outputs / readiness / defaults / handler,不重新理解任何声明语法;
+- 任何存在于 DSL 与 NodeType 之间的东西,必须具有独立的语义职责
+  (docs/graph-node-protocol.md §1.0)。
+"""
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 from .assets import AssetIn
 from .ports import DataIn, DataOut, SignalIn, SignalOut, TriggerIn
-from .readiness import Readiness
+from .readiness import Readiness, _All, _Any, _Data, _Trigger
+
+def _refs(pred) -> set[str]:
+    """Readiness 谓词引用的端口集合(供组间不变式校验)。"""
+    if pred is None:
+        return set()
+    if isinstance(pred, (_Data, _Trigger)):
+        return {pred.port}
+    if isinstance(pred, (_All, _Any)):
+        return set().union(*(_refs(c) for c in pred.conds))
+    return set()
+
 
 @dataclass(frozen=True)
 class Group:
@@ -19,6 +40,8 @@ class Group:
 
 @dataclass(frozen=True)
 class NodeType:
+    """语义 IR / Node ABI:一份已完成语义解析的节点契约(身份见模块 docstring)。"""
+
     name: str
     data_in: tuple[DataIn, ...] = ()
     data_out: tuple[DataOut, ...] = ()
@@ -31,6 +54,69 @@ class NodeType:
     groups: tuple[Group, ...] = ()
     tags: tuple[str, ...] = ()
     init: Any = None
+    def __post_init__(self) -> None:
+        """组间不变式:契约非法状态不可构造(校验内联进 IR,而非外部校验器)。
+
+        端口归属唯一是 IR 的结构性要求:一个输入/触发器/输出端口至多属于
+        一个组,且每个输入端口必须归属某个组。此前由 validate._type_errors
+        兜底——但手工构造 NodeType(绕过 DSL)可构造出二义契约,执行语义
+        未定义。约束由 IR 自身保证:任何构造路径(DSL 编译、手工构造、
+        序列化恢复)都必须先通过本校验。
+        """
+
+        name = self.name
+
+        def _err(msg: str) -> None:
+            raise ValueError(f"node type {name!r}: {msg}")
+
+        group_names = [g.name for g in self.groups]
+        if len(group_names) != len(set(group_names)):
+            _err("duplicate group name")
+        data_ports = {p.name for p in self.data_in}
+        signal_ports = {p.name for p in self.signal_in}
+        trigger_ports = {p.name for p in self.trigger_in}
+        out_ports = {p.name for p in (*self.data_out, *self.signal_out)}
+        bound: set[str] = set()
+        for p in self.data_in:
+            if p.signal is not None:
+                if p.signal not in signal_ports:
+                    _err(f"DataIn {p.name!r} references unknown SignalIn {p.signal!r}")
+                if p.signal in bound:
+                    _err(f"a SignalIn may bind only one DataIn ({p.signal!r})")
+                bound.add(p.signal)
+        allowed_inputs = data_ports | (signal_ports - bound)
+        input_owner: dict[str, str] = {}
+        trigger_owner: dict[str, str] = {}
+        output_owner: dict[str, str] = {}
+        for g in self.groups:
+            if g.handler is None:
+                _err(f"group {g.name!r}: handler is required")
+            if not g.inputs and not g.triggers and g.readiness is None:
+                _err(f"group {g.name!r}: empty default group")
+            for p in g.inputs:
+                if p not in allowed_inputs:
+                    _err(f"group {g.name!r}: invalid input {p!r}")
+                if p in input_owner:
+                    _err(f"input {p!r} belongs to both {input_owner[p]!r} and {g.name!r}")
+                input_owner[p] = g.name
+            for t in g.triggers:
+                if t not in trigger_ports:
+                    _err(f"group {g.name!r}: invalid trigger {t!r}")
+                if t in trigger_owner:
+                    _err(f"trigger {t!r} belongs to both {trigger_owner[t]!r} and {g.name!r}")
+                trigger_owner[t] = g.name
+            for o in g.outputs:
+                if o not in out_ports:
+                    _err(f"group {g.name!r}: invalid output {o!r}")
+                if o in output_owner:
+                    _err(f"output {o!r} belongs to both {output_owner[o]!r} and {g.name!r}")
+                output_owner[o] = g.name
+            if g.readiness is not None and not _refs(g.readiness) <= set(g.inputs) | set(g.triggers):
+                _err(f"group {g.name!r}: readiness references non-group port")
+        for p in allowed_inputs:
+            if p not in input_owner:
+                _err(f"input {p!r} is not assigned to a group")
+
     @property
     def is_signal_node(self) -> bool: return bool(self.signal_out)
     def port(self, name: str):

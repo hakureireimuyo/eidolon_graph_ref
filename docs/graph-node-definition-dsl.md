@@ -58,6 +58,10 @@ Python 函数签名(语法承载)
      GraphInstance / Executor(内核,零改动)
 ```
 
+NodeType 的身份是**语义 IR**:DSL 的编译目标、内核的唯一输入、编辑器与
+运行时共享的序列化契约——运行时执行的是语义,不是语法;任何存在于 DSL
+与 NodeType 之间的东西必须具有独立的语义职责(graph-node-protocol.md §1.0)。
+
 ## 2. 语法规范
 
 ### 2.1 注解词汇表
