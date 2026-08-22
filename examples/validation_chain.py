@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from eidolon_graph_ref.console import render_epoch, render_event_archive, render_state
 from eidolon_graph_ref.engine.event import Injection, Kind
-from eidolon_graph_ref.model.graph import GraphDefinition, SLOT_QUAL, SLOT_TRIGGER
+from eidolon_graph_ref.model.graph import GraphDefinition, SLOT_SIGNAL, SLOT_TRIGGER
 from eidolon_graph_ref.model.validate import ensure_valid
 from eidolon_graph_ref.engine.instance import GraphInstance
 from eidolon_primitives import PRIMITIVES
@@ -32,15 +32,15 @@ from eidolon_primitives import PRIMITIVES
 def build() -> GraphDefinition:
     g = GraphDefinition("validation-chain")
     g.add_node("src", "Source")
-    g.add_node("const", "Constant", value=10)
+    g.add_node("const", "Constant", config={"groups": {"tick": {"value": 10}}})
     g.add_node("buf", "Buffer")
     g.add_node("join", "Join")
     g.add_node("split", "Split")
     g.add_node("latch", "Latch")
     g.add_node("probe", "Probe")
-    g.add_node("dts", "DataToSignal", mode="truthy")
+    g.add_node("dts", "DataToSignal", config={"groups": {"convert": {"mode": "truthy"}}})
     # x 按端口名配置覆盖静态默认值：信号 HIGH 时放行的值（受控默认参数）
-    g.add_node("stod", "SignalToData", x="RELEASED")
+    g.add_node("stod", "SignalToData", config={"ports": {"x": "RELEASED"}})
     g.add_node("sink", "Sink")
     g.wire("src", "out", "buf", "put")
     g.wire("buf", "out", "join", "a")
@@ -49,7 +49,7 @@ def build() -> GraphDefinition:
     g.wire("split", "out1", "latch", "data")
     g.wire("split", "out2", "probe", "in")
     g.wire("latch", "out", "dts", "data")
-    g.wire("dts", "level", "stod", "x", slot=SLOT_QUAL)
+    g.wire("dts", "level", "stod", "gate", slot=SLOT_SIGNAL)
     g.wire("dts", "level", "stod", "pass", slot=SLOT_TRIGGER)
     g.wire("stod", "out", "sink", "in")
     return g
@@ -69,10 +69,10 @@ def main() -> None:
         print()
         print(note)
 
-    # 两个空 epoch：源节点播种（src 累积到 buf；const 持续供给 join.b）
-    world.run()
+    # 宿主显式注入节拍；空 epoch 不会播种任何节点。
+    world.run([Injection("src", "tick", SLOT_TRIGGER, Kind.SIGNAL, True), Injection("const", "tick", SLOT_TRIGGER, Kind.SIGNAL, True)])
     show("epoch 1: src→buf 累积, const→join.b；join 等待 a (未 flush)")
-    world.run()
+    world.run([Injection("src", "tick", SLOT_TRIGGER, Kind.SIGNAL, True), Injection("const", "tick", SLOT_TRIGGER, Kind.SIGNAL, True)])
     show("epoch 2: 同上，累积继续")
 
     # 注入 flush 触发：Buffer 取出全部累积 → join 同步 → split 扇出 → latch 缓存 / probe 记录

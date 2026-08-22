@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from ..model.graph import SLOT_DATA, SLOT_QUAL, SLOT_SIGNAL, SLOT_TRIGGER
+from ..model.graph import SLOT_DATA, SLOT_SIGNAL, SLOT_TRIGGER
 
 
 class Kind(str, Enum):
@@ -81,7 +81,7 @@ class Injection:
     def __post_init__(self) -> None:
         if self.slot == SLOT_DATA and self.kind is not Kind.DATA:
             raise ValueError("injection into data slot must be a data event")
-        if self.slot in (SLOT_QUAL, SLOT_SIGNAL) and self.kind is not Kind.SIGNAL:
+        if self.slot == SLOT_SIGNAL and self.kind is not Kind.SIGNAL:
             raise ValueError(f"injection into {self.slot!r} slot must be a signal event")
         if self.slot == SLOT_TRIGGER and self.kind not in (Kind.DATA, Kind.SIGNAL):
             raise ValueError("injection into trigger slot must be a data or signal event")

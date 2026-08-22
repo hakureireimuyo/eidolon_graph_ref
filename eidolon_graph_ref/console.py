@@ -72,11 +72,10 @@ def render_state(observable: dict) -> str:
         st = ", ".join(f"{k}={_short(v)}" for k, v in view["state"].items()) or "—"
         ports = []
         for name, p in view["data_in"].items():
-            qual = f" qual={p['qual']['level']}/{p['qual']['pending']}" if p["qual"] else ""
-            ports.append(f"{name}: v={_short(p['value'])} pending={p['pending']}{qual}")
+            ports.append(f"{name}: v={_short(p['value'])} pending={p['pending']}")
         for name, p in view["trigger_in"].items():
             ports.append(f"{name}: pending={p['pending']} payload={_short(p['payload'])}")
-        for name, p in view["enable"].items():
+        for name, p in view.get("signal_in", {}).items():
             ports.append(f"{name}: level={p['level']} pending={p['pending']}")
         lines.append(f"  {nid:<10} [{view['type']}] state: {st}")
         for port in ports:

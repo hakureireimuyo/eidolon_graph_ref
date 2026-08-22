@@ -13,10 +13,8 @@ from typing import Any
 from .assets import AssetRef
 
 # 连线目标槽位：决定"这条线传递什么、端口如何消费它"
-# DataIn 有两个可接线槽位：data(数据槽) / qual(资格槽，仅 qualified=True 时存在)
-# TriggerIn 一个槽位：trigger；SignalIn 一个槽位：signal
+# DataIn/TriggerIn/SignalIn each have one receiving slot.
 SLOT_DATA = "data"
-SLOT_QUAL = "qual"
 SLOT_TRIGGER = "trigger"
 SLOT_SIGNAL = "signal"
 
@@ -61,6 +59,10 @@ class GraphDefinition:
     def add_node(self, node_id: str, type_name: str, **config: Any) -> GraphDefinition:
         if node_id in self._nodes:
             raise ValueError(f"duplicate node id {node_id!r}")
+        # Config is deliberately partitioned by lifecycle.  Keep a single
+        # ``config={...}`` argument ergonomic while rejecting flat overrides.
+        if set(config) == {"config"}:
+            config = dict(config["config"])
         self._nodes[node_id] = NodeSpec(id=node_id, type=type_name, config=dict(config))
         return self
 

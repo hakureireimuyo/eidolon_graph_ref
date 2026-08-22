@@ -3,8 +3,9 @@
 from .event import Delivery, Event, Injection, Kind
 from .executor import Executor
 from .instance import AssetResolver, BuildReport, GraphInstance
+from .node_semantics import NodeSemantics
 from .port_state import DataPortState, SignalPortState, TriggerPortState
-from .protocol import InitContext, TickContext, TickOutput
+from .protocol import GroupContext, GroupOutput, InitContext
 from .timeline import Entry, Timeline
 
 __all__ = [
@@ -16,12 +17,13 @@ __all__ = [
     "Kind",
     "Executor",
     "GraphInstance",
+    "NodeSemantics",
     "InitContext",
     "DataPortState",
     "SignalPortState",
     "TriggerPortState",
-    "TickContext",
-    "TickOutput",
+    "GroupContext",
+    "GroupOutput",
     "Entry",
     "Timeline",
 ]

@@ -1,12 +1,13 @@
 # 节点协议(内核 ↔ 外部节点 ABI)
 
-> 状态:裁定修订(2026-08-22,Group-centric 迁移),实现与测试翻转待执行
+> 状态:裁定修订(2026-08-22,Group-centric 迁移);参考实现已迁移，旧基线测试待翻转
 >
 > 定位:本文档是节点协议的**最终规范文档**——内核与外部/自定义节点实现之间的
 > 唯一契约(ABI)。Group-centric 修订的修正方案与裁定过程记录于
 > [graph-group-protocol.md](./graph-group-protocol.md)。
 >
-> 本次修订:**§2 节点定义层、§3 运行层、§5 内核边界层、§9-§11 重写**;
+> 本次修订:**§1 增补总体架构与所有权边界(核心原则)、§2 节点定义层、
+> §3 运行层、§5 内核边界层、§9-§11 重写**;
 > §4 资源访问层、§6 Activation/Event 契约、§7 init 钩子语义不变(仅术语更新)。
 >
 > 相关:[Asset 模型](./graph-assets.md)、[资产协议](./graph-asset-protocols.md)、
@@ -42,7 +43,121 @@
 4. **事件传播层与行为层正交。** 事件系统 Port-centric(Event → Wire →
    Port);Port 经声明层静态归属一个 Group;Event 不携带任何 Group 信息。
 
+### 1.0 总体架构与所有权边界（核心原则）
+
+**核心原则(一句话):**
+
+> **NodeDefinition inheritance is declarative, not behavioral.**
+> 节点定义的继承表达"这是一个合法的节点定义"(声明资格),而不是"从父节点
+> 继承运行时行为"。所有节点共有的默认运行语义由 Kernel 统一提供,而非由
+> NodeDefinition 基类提供。"具体节点禁止二次继承"只是这条原则的一条推论,
+> 不是原因。
+
+**两层结构:声明层与执行层。**
+
+```text
+                NodeDefinition(声明入口 / DSL)
+                          │
+                          │ 声明资格(class MyNode(NodeDefinition))
+                          ▼
+                  Concrete Definition(声明 ports / groups / 资产 / init / handler)
+                          │
+                          │ compile(类创建期)
+                          ▼
+                       NodeType(冻结声明 + 不透明 handler callable)
+                          │
+                          │ 被 Kernel 解释
+                          ▼
+                    NodeSemantics(Kernel final:readiness / consume /
+                          │        解释矩阵 / 静态动态吸收 / 组执行)
+                          ▼
+                      Executor(时间线与 worklist 编排)
+```
+
+`class MyNode(NodeDefinition)` 不是传统 OOP 实现继承——不存在"继承
+fire() / receive()"这种事——而是**声明资格**:编译器把声明编译成
+`MyNode.TYPE`,Kernel 再对 TYPE 统一施加运行语义。运行时不存在节点对象。
+
+**所有权表:**
+
+| 东西 | 所有者 | 作用 |
+|---|---|---|
+| 节点声明协议 | `NodeDefinition` | 规定什么样的 Python 定义可被编译成 `NodeType` |
+| 普遍执行语义 | Kernel / `NodeSemantics` | 规定任何合法 `NodeType` 的运行规则,不可重载 |
+| 具体领域行为 | Concrete Node | handler 如何根据自己的状态计算输出 |
+| 共享领域行为 | Definition Material | 普通类(不编译 TYPE),被多个具体节点复用(§2.0) |
+| 事件传递 | Kernel | 在地址之间传递事件 |
+
+**`NodeDefinition` 与 `NodeSemantics` 的严格区分。**
+
+- `NodeDefinition` 回答:"我有哪些端口?哪些输入组?哪些资产声明?handler
+  是谁?状态 schema 是什么?"——它**不得**提供 receive / consume / fire /
+  emit 等运行行为,越薄越好。
+- `NodeSemantics` 规定:"什么叫 ready?何时消费?Data / Signal / Trigger
+  如何解释?静态 / 动态如何吸收?何时 fire?GroupOutput 如何变成 Event?"
+  ——Kernel final,`__init_subclass__` 拒绝子类化(§3.0)。
+
+**内核的稳定边界。**
+
+内核不理解节点的领域身份——不存在 `if node_type == Buffer` 分支——只理解:
+事件、地址(节点 id + 端口 + 槽位)、端口状态、组协议、统一 handler ABI。
+运行事实链:
+
+```text
+Event → (address, payload) → port state → group readiness
+      → handler(ctx) → GroupOutput → Event
+```
+
+内核的输入 = Event / NodeType / State,输出 = Event / State。Buffer、LLM
+与未来完全未知的节点,对内核都只是满足同一协议的 `NodeType`。
+
+**输入组 = 节点行为的真正边界。**
+
+节点的全部创造性集中在 ports / groups / predicates / handler / state;
+其余是内核统一语义。共享领域行为属于独立 Definition Material,不属于任何
+具体节点——这也是 `BufferMaterial` 方向合理的依据:材料提供节点定义材料,
+但不能变成第二套 Kernel 语义。
+
 ## 2. Node 定义层
+
+### 2.0 Node Definition Language（定义期，不进入 Kernel）
+
+`NodeDefinition` 是**具体节点的声明入口**，不是领域行为的公共基类；它不是
+图中的节点实例。类创建时，`NodeDefinitionMeta` 绑定 handler、检查声明，并
+把类体编译成独立的 `NodeType`：
+
+```text
+class Buffer(NodeDefinition) → 类创建期校验/编译 → Buffer.TYPE → GraphInstance
+```
+
+Kernel 只接收 `TYPE`，不保存 Python class、MRO、父类或虚函数表，也绝不构造
+`NodeDefinition` 实例。定义语言使用 `GroupSpec(handler="method_name")` 引用
+`@staticmethod` handler；编译后才成为 `Group(handler=callable)`。
+
+**能力所有权边界（冻结）**：
+
+```text
+普遍节点语义（事件解释矩阵 / 执行生命周期 / 构建管线）→ Kernel（final，自动生效）
+节点特有的共享行为 → 独立定义材料（普通 Python 类，不编译 TYPE、不进 Kernel）
+Concrete NodeDefinition ──❌──► Concrete NodeDefinition
+```
+
+具体节点之间**不形成行为继承关系**：一个具体节点不能成为另一个具体节点的
+行为供应商。`Buffer → RingBuffer` 是错误的建模方式——RingBuffer 需要 Buffer
+的共享部分时，应把可复用部分提取为独立材料（如 `BufferMaterial`），由两个
+平行节点共同引用：
+
+```text
+Buffer     = NodeDefinition + BufferMaterial
+RingBuffer = NodeDefinition + BufferMaterial（同名 staticmethod 遮蔽单个行为）
+```
+
+材料复用（mixin）是当前非正式实现通道，最终形态暂不冻结：材料作者自行
+负责字段 / handler 不冲突（MRO 同名字段静默后胜，无强制冲突检测）。第一个
+真实共享案例出现后，再裁定是否需要正式的组件形态。
+
+定义期错误（非静态 handler、非单一必填 `ctx` 参数、继承具体节点定义等）
+抛出 `DefinitionError`，早于图校验与 `GraphInstance.build()`。
 
 ### 2.1 NodeType
 
@@ -166,6 +281,12 @@ default_readiness(g) =
 
 ### 2.5 Signal 双语义
 
+端口事件的解释属于内核 final 基类 `engine/node_semantics.py::NodeSemantics`，
+而不属于 `NodeDefinition` 或 Group handler：Data Event 只能更新 DataIn cache，
+Signal Event 只能更新 SignalIn level，二者都可投递 TriggerIn（分别携带载荷/
+纯激活）。该基类再依据 `DataIn.signal` 解释静态/动态数据来源与 DATA leaf。
+它不可继承或覆盖；Executor 仅负责时间线与 worklist 编排。
+
 信号具备两种语义:
 
 **语义一:绑定控制(数据来源选择)。** `DataIn.signal = "gate"` 声明绑定,
@@ -238,6 +359,28 @@ port_static(p)     = config["ports"].get(p.name, p.default)             → 静�
 
 ## 3. Node 运行层
 
+### 3.0 事件解释矩阵（内核 final：NodeSemantics）
+
+Data / Signal / Trigger 三种事实与槽位的正交组合如何被解释——§2.5 的静态/
+动态吸收、绑定信号的控制消费、触发载荷并入实参、组消费——是内核 final
+协议行为，集中在 `engine/node_semantics.py` 的 `NodeSemantics`。定义层不
+存在可重载覆盖点（§2.0 能力所有权边界：具体节点之间不形成行为继承关系），
+`__init_subclass__` 直接拒绝子类化。
+
+```text
+receive            投递槽位写入：data/signal/trigger 三种状态的唯一入口
+consume            端口状态 pending → consumed（时间线消费记录）
+settle_control     绑定 SignalIn 的唤醒-消费：控制态更新，level 保持
+dynamic/effective  DataIn 与绑定 SignalIn 的正交解释：静态/动态吸收（§2.5）
+handler_arguments  组实参解析：effective 逐端口 + 触发载荷
+group_ready        谓词求值（DATA/TRIGGER 叶，§2.4）
+consume_group      组消费：输入（Data 或未绑定 Signal）+ 触发器载荷清除
+```
+
+执行器（`engine/executor.py`）只做编排：注入/产出事件的建档、worklist 脏传播、
+NodeTurn 预算、handler 调用、输出校验与扇出投递——不含任何解释逻辑。
+运行态不存在节点对象：矩阵解释直接作用于 `GraphInstance` 的端口状态。
+
 ### 3.1 构建管线
 
 ```text
@@ -267,10 +410,10 @@ fire 流程:
 
 ```text
 谓词满足
-  → 逐端口模式判定 + effective 解析(§2.5)
+  → 逐端口模式判定 + effective 解析(§2.5,内核 final §3.0)
   → GroupContext 构造(state 深拷贝 / config = group_effective / assets 浅拷贝)
   → group.handler(ctx) -> GroupOutput | None
-  → 消费本组端口 pending(value/level 保持)
+  → 消费本组端口 pending(§3.0;value/level 保持)
   → 状态提交(增量;未知字段/不可复制 = KIND_ERROR)
   → 输出校验(键 ⊆ group.outputs,违者 KIND_ERROR + 丢弃)
   → 产出即时投递(零拷贝探针)
