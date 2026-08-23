@@ -76,6 +76,12 @@ class NodeType:
         signal_ports = {p.name for p in self.signal_in}
         trigger_ports = {p.name for p in self.trigger_in}
         out_ports = {p.name for p in (*self.data_out, *self.signal_out)}
+        in_names = [p.name for p in (*self.data_in, *self.trigger_in, *self.signal_in)]
+        if len(in_names) != len(set(in_names)):
+            _err("duplicate input port name across port categories")
+        out_names = [p.name for p in (*self.data_out, *self.signal_out)]
+        if len(out_names) != len(set(out_names)):
+            _err("duplicate output port name across port categories")
         bound: set[str] = set()
         for p in self.data_in:
             if p.signal is not None:
@@ -138,4 +144,4 @@ class NodeType:
                 "asset_in": [{"name": p.name, "type": p.type.__name__ if p.type else None} for p in self.asset_in],
                 "state_defaults": dict(self.state_defaults), "init_defaults": dict(self.init_defaults), "tags": list(self.tags),
                 "groups": [{"name": g.name, "inputs": list(g.inputs), "triggers": list(g.triggers), "outputs": list(g.outputs), "defaults": dict(g.defaults), "has_handler": g.handler is not None, "readiness": repr(g.readiness)} for g in self.groups],
-                "has_init": self.init is not None, "has_tick": False, "is_signal_node": self.is_signal_node}
+                "has_init": self.init is not None, "is_signal_node": self.is_signal_node}

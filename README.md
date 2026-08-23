@@ -161,7 +161,7 @@ docs/graph-node-protocol.md）、平面边界攻击测试套件、语义测试�
 ```bash
 cd kernel/eidolon_graph_ref
 uv sync                      # 安装 dev 依赖（pytest）
-uv run pytest                # 117 个语义 + 边界测试
+uv run pytest                # 89 个语义 + 边界测试
 uv run python examples/validation_chain.py   # 控制台观察事件传播
 uv run python examples/external_node.py      # 外部节点包端到端(节点协议 ABI)
 ```
@@ -170,11 +170,12 @@ uv run python examples/external_node.py      # 外部节点包端到端(节点�
 
 ```
 eidolon_graph_ref/           # 内核核心包（零第三方依赖，不认识任何具体节点）
-├── model/                   # ports / node_type / graph / validate
-├── engine/                  # event / port_state / protocol / timeline / executor / instance
+├── model/                   # ports / readiness / node_type / definition / graph / validate / assets
+├── engine/                  # event / port_state / protocol / timeline / node_semantics / executor / instance
 └── console.py               # 控制台渲染（时间线 + 事件档案 + 节点状态）
 eidolon_primitives/          # 内置节点包（10 个验证原语，与内核平级，经宿主 types 注册）
-docs/                        # 裁定文档(graph-assets / graph-asset-protocols / graph-node-protocol)
+docs/                        # 裁定文档(graph-concepts / graph-node-protocol / graph-group-protocol /
+                             #            graph-node-definition-dsl / graph-assets / graph-asset-protocols)
 examples/                    # validation_chain.py 组合链演示;external_node.py 外部节点包演示
 tests/                       # 语义测试（建模正确性）
 ```

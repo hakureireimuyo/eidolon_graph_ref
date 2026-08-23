@@ -21,7 +21,7 @@ if __name__ == "__main__":
     graph = GraphDefinition("external")
     graph.add_node("wc", "WordCount")
     graph.add_node("sink", "Sink")
-    graph.wire("wc", "count", "sink", "in")
+    graph.wire("wc", "count", "sink", "consume.value")
     world = GraphInstance.build(graph, {**PRIMITIVES, "WordCount": WordCount.TYPE}).instance
     world.run([Injection("wc", "text", SLOT_DATA, Kind.DATA, "group handler ABI")])
     print(world.observable_state())

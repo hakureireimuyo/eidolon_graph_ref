@@ -29,7 +29,7 @@ class Delivery:
     event_id: int
     node: str  # 目标节点
     port: str  # 目标输入端口
-    slot: str  # 目标槽位（data/qual/trigger/signal）
+    slot: str  # 目标槽位（data/trigger/signal）
     seq: int  # 时间线序号
     consumed_seq: int | None = None  # 该投递的 pending 被消费的时间线序号
 

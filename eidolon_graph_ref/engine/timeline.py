@@ -5,7 +5,7 @@
 
 - 时间线：按序的传播事实（inject / deliver / fire / consume / error / quiesce）
 - 事件档案：所有产生过的事件（含生命周期），被消费后暂时保留
-- 独立于错误日志（实例 log），不进状态（验证阶段无持久化）
+- 独立于错误日志，不进状态（验证阶段无持久化）
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from .event import Event
 
 KIND_DELIVER = "deliver"  # 事件投递（宿主注入与节点产出同构；src=None = 宿主）
 KIND_FIRE = "fire"  # 组执行（消费哪些事件、产出哪些事件）
-KIND_CONSUME = "consume"  # 无执行的 pending 消费（enable 通知 / 资格槽 LOW 自我消费）
+KIND_CONSUME = "consume"  # 无执行的 pending 消费（绑定信号的控制态更新,level 保持）
 KIND_ERROR = "error"  # tick 异常或声明违规
 KIND_QUIESCE = "quiesce"  # 队列排空，epoch 静止
 

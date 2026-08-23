@@ -25,8 +25,7 @@ class Wire:
 
     源 = 输出端口(DataOut/SignalOut)；目标 = 输入端口 + 槽位。
     dst_slot 为 None 时由校验/实例构建按端口声明自动推断
-    （TriggerIn→trigger、SignalIn→signal、DataIn→data；
-    SignalOut→已声明资格槽的 DataIn 二义，必须显式指定）。
+    （DataIn→data、TriggerIn→trigger、SignalIn→signal）。
     扇入禁止：每个(节点, 端口, 槽位)至多一条线；扇出无限。
     """
 
@@ -110,5 +109,5 @@ class GraphDefinition:
         return dict(self._asset_bindings)
 
     def node_order(self) -> list[str]:
-        """节点声明序（播种等使用）。"""
+        """节点声明序。"""
         return list(self._nodes.keys())

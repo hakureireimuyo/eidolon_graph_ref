@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from ..model.graph import SLOT_DATA, SLOT_SIGNAL, SLOT_TRIGGER
 from .event import Event, Kind
+from .timeline import Entry, KIND_CONSUME
 
 
 class NodeSemantics:
@@ -60,13 +61,20 @@ class NodeSemantics:
     @classmethod
     def settle_control_signals(cls, inst, node_id: str) -> None:
         """Bound signals control source selection only.  Their occurrence wakes
-        this node, then is consumed as a control-state update; the level persists."""
+        this node, then is consumed as a control-state update; the level persists.
+        The consumption is recorded as a KIND_CONSUME timeline entry (no fire)."""
 
         nt = inst.types[inst.definition.nodes[node_id].type]
-        for port in {p.signal for p in nt.data_in if p.signal}:
+        # 按声明序遍历绑定信号(set 迭代跨进程不稳定,PYTHONHASHSEED 随机化会破坏
+        # KIND_CONSUME 的 seq 分配确定性);1:1 绑定不变式下无重复,dict.fromkeys 防御保序去重。
+        for port in dict.fromkeys(p.signal for p in nt.data_in if p.signal):
             state = inst.signal_states[node_id][port]
             if state.pending:
+                ids = tuple(state.pending_events)
                 cls.consume(inst, state, node_id, port)
+                inst.timeline.record(
+                    Entry(run=inst.run_no, kind=KIND_CONSUME, dst_node=node_id, dst_port=port, consumed=ids, message="control signal settled")
+                )
 
     @classmethod
     def handler_arguments(cls, inst, node_id: str, group) -> dict:

@@ -3,15 +3,15 @@
 《架构验证性重写》的验收场景：用少量 Primitive Node 把核心机制组合起来，
 通过控制台输出直接观察事件传递过程（事件身份、谁生产、谁消费）。
 
-拓扑：
-    src(Source) ──→ buf.put            const(Constant) ──→ join.b
-    buf.out ──→ join.a
-    join.out ──→ split.in ──out1──→ latch.data
-                     └─out2──→ probe.in
-    latch.out ──→ dts.data(DataToSignal)
-    dts.level ──┬──→ stod.x[qual]      (信号两重语义分别消费：level 状态 / occurrence 激活)
-                └──→ stod.pass[trigger]
-    stod.out ──→ sink.in
+拓扑（DSL v2 组限定端口名："{组}.{参数}"；单输出端口名 = 组名）：
+    src.tick ──→ buf.put.item            const.tick ──→ join.join.b
+    buf.flush ──→ join.join.a
+    join.join ──→ split.fan.value ──fan.out1──→ latch.release.data
+                                  └─fan.out2──→ probe.observe.value
+    latch.release ──→ dts.convert.data(DataToSignal)
+    dts.convert ──┬──→ stod.pass_value.gate[signal]   (信号两重语义分别消费:level 状态 / occurrence 激活)
+                  └──→ stod.pass_value.pass[trigger]
+    stod.pass_value ──→ sink.consume.value
 
 运行：uv run python examples/validation_chain.py
 """
@@ -39,19 +39,19 @@ def build() -> GraphDefinition:
     g.add_node("latch", "Latch")
     g.add_node("probe", "Probe")
     g.add_node("dts", "DataToSignal", config={"groups": {"convert": {"mode": "truthy"}}})
-    # x 按端口名配置覆盖静态默认值：信号 HIGH 时放行的值（受控默认参数）
-    g.add_node("stod", "SignalToData", config={"ports": {"x": "RELEASED"}})
+    # x 按端口名配置覆盖静态默认值：信号未激活时放行的受控默认参数
+    g.add_node("stod", "SignalToData", config={"ports": {"pass_value.x": "RELEASED"}})
     g.add_node("sink", "Sink")
-    g.wire("src", "out", "buf", "put")
-    g.wire("buf", "out", "join", "a")
-    g.wire("const", "out", "join", "b")
-    g.wire("join", "out", "split", "in")
-    g.wire("split", "out1", "latch", "data")
-    g.wire("split", "out2", "probe", "in")
-    g.wire("latch", "out", "dts", "data")
-    g.wire("dts", "level", "stod", "gate", slot=SLOT_SIGNAL)
-    g.wire("dts", "level", "stod", "pass", slot=SLOT_TRIGGER)
-    g.wire("stod", "out", "sink", "in")
+    g.wire("src", "tick", "buf", "put.item")
+    g.wire("buf", "flush", "join", "join.a")
+    g.wire("const", "tick", "join", "join.b")
+    g.wire("join", "join", "split", "fan.value")
+    g.wire("split", "fan.out1", "latch", "release.data")
+    g.wire("split", "fan.out2", "probe", "observe.value")
+    g.wire("latch", "release", "dts", "convert.data")
+    g.wire("dts", "convert", "stod", "pass_value.gate", slot=SLOT_SIGNAL)
+    g.wire("dts", "convert", "stod", "pass_value.pass", slot=SLOT_TRIGGER)
+    g.wire("stod", "pass_value", "sink", "consume.value")
     return g
 
 
@@ -70,17 +70,17 @@ def main() -> None:
         print(note)
 
     # 宿主显式注入节拍；空 epoch 不会播种任何节点。
-    world.run([Injection("src", "tick", SLOT_TRIGGER, Kind.SIGNAL, True), Injection("const", "tick", SLOT_TRIGGER, Kind.SIGNAL, True)])
-    show("epoch 1: src→buf 累积, const→join.b；join 等待 a (未 flush)")
-    world.run([Injection("src", "tick", SLOT_TRIGGER, Kind.SIGNAL, True), Injection("const", "tick", SLOT_TRIGGER, Kind.SIGNAL, True)])
+    world.run([Injection("src", "tick.trigger", SLOT_TRIGGER, Kind.SIGNAL, True), Injection("const", "tick.trigger", SLOT_TRIGGER, Kind.SIGNAL, True)])
+    show("epoch 1: src→buf 累积, const→join.join.b；join 等待 a (未 flush)")
+    world.run([Injection("src", "tick.trigger", SLOT_TRIGGER, Kind.SIGNAL, True), Injection("const", "tick.trigger", SLOT_TRIGGER, Kind.SIGNAL, True)])
     show("epoch 2: 同上，累积继续")
 
     # 注入 flush 触发：Buffer 取出全部累积 → join 同步 → split 扇出 → latch 缓存 / probe 记录
-    world.run([Injection(node="buf", port="flush", slot=SLOT_TRIGGER, kind=Kind.SIGNAL, payload=True)])
+    world.run([Injection(node="buf", port="flush.trigger", slot=SLOT_TRIGGER, kind=Kind.SIGNAL, payload=True)])
     show("epoch 3: 注入 flush → join → split → latch 缓存数据(不输出) / probe 记录")
 
     # 注入 release 触发：Latch 释放缓存 → DataToSignal 算电平 → SignalToData 受控放行 → Sink
-    world.run([Injection(node="latch", port="release", slot=SLOT_TRIGGER, kind=Kind.SIGNAL, payload=True)])
+    world.run([Injection(node="latch", port="release.trigger", slot=SLOT_TRIGGER, kind=Kind.SIGNAL, payload=True)])
     show("epoch 4: 注入 release → latch 释放 → dts 电平 HIGH → stod 放行 → sink 吸收")
 
     print(render_event_archive(world.timeline))
