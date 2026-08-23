@@ -69,10 +69,14 @@ def test_buffer_put_accumulates_flush_releases():
     assert deliveries(world, "buf", "flush") == []  # 数据暂存但不产生执行事件
     world.run([Injection("buf", "flush.trigger", SLOT_TRIGGER, Kind.SIGNAL, True)])
     assert deliveries(world, "buf", "flush") == [[1, 2]]
+    # 第二轮:flush 清空后继续 put,旧项不得复活(APPEND 缓存随消费排空)
+    world.run([Injection("buf", "put.item", SLOT_DATA, Kind.DATA, 3)])
+    world.run([Injection("buf", "flush.trigger", SLOT_TRIGGER, Kind.SIGNAL, True)])
+    assert deliveries(world, "buf", "flush") == [[1, 2], [3]]
     assert node_state(world, "buf")["items"] == []
     # 空缓冲 flush:无事实发生,不产出
     world.run([Injection("buf", "flush.trigger", SLOT_TRIGGER, Kind.SIGNAL, True)])
-    assert deliveries(world, "buf", "flush") == [[1, 2]]
+    assert deliveries(world, "buf", "flush") == [[1, 2], [3]]
 
 
 def test_join_syncs_multiple_inputs():

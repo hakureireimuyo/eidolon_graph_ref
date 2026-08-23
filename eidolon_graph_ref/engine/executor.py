@@ -80,7 +80,7 @@ class Executor:
         for k, v in out.state.items():
             if k not in unknown:
                 try:
-                    deepcopy(v)
+                    deepcopy(v)  # 值域探针:可拷贝性校验,存原对象(零拷贝共享)
                     inst.node_states[nid][k] = v
                 except Exception:
                     inst.timeline.record(
@@ -125,7 +125,7 @@ class Executor:
                 continue
             try:
                 if kind is Kind.DATA:
-                    deepcopy(value)
+                    deepcopy(value)  # 值域探针:可拷贝性校验,零拷贝共享
             except Exception:
                 inst.timeline.record(
                     Entry(run=inst.run_no, kind=KIND_ERROR, dst_node=nid, message=f"non-copyable output {port!r}")

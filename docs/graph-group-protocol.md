@@ -355,20 +355,30 @@ Event 不携带任何 Group 字段;投递路径不遍历组
 
 统一 `_ENABLE` 惯例删除;SignalIn 只在有绑定的节点声明:
 
-| 原语 | 端口 | 组(readiness) | outputs | defaults | tags |
-|---|---|---|---|---|---|
-| Source | trigger `tick`;out | tick(默认 → TRIGGER(tick)) | out | step=1 | ("source",) |
-| Constant | trigger `tick`;out | tick(默认 → TRIGGER(tick)) | out | value=0 | ("source",) |
-| Sink | data in | in:`ANY(DATA(in))` | () | | |
-| Probe | data in | in:`ANY(DATA(in))` | () | | |
-| Buffer | data put(APPEND);trigger flush;out | put:`ANY(DATA(put))` / flush(默认) | put=() flush=(out,) | | |
-| Join | data a,b;out | sync(默认 → ALL) | out | | |
-| Split | data in;out1,out2 | fan:`ANY(DATA(in))` | out1,out2 | | |
-| Latch | data data(signal=gate);trigger release;signal gate;out | release(默认 → ALL(DATA,TRIGGER)) | out | | |
-| DataToSignal | data data;signal_out level | convert:`ANY(DATA(data))` | level | mode,threshold | |
-| SignalToData | data x(signal=gate,**必须连线**);trigger pass;signal gate;out | pass(默认 → ALL(DATA,TRIGGER)) | out | | |
+DSL v2 迁移后,Primitive 的 ABI 名以实际编译产物为准(2026-08-23 修订)。
+命名链:handler 函数名 = Group identity(裁定 1);组内端口 = `{group}.{param}`
+(裁定 2);`-> T` 输出端口 = 组名;`@group(outputs=(...))` 扩展输出端口为
+`{group}.{name}`;触发器端口默认 `{group}.trigger`,`@group(trigger=...)` 可
+解耦端口名末段(撞 Python 关键字,如 `pass`)。
 
-- 宿主驱动:`world.run([Injection("src", "tick", SLOT_TRIGGER, Kind.SIGNAL, True)])`
+| Primitive | DSL handler(@group 函数) | 编译后 Group | 编译后 Ports(组限定) |
+|---|---|---|---|
+| Source | `tick` | `tick` | `tick.trigger`(TriggerIn);`tick`(DataOut) |
+| Constant | `tick` | `tick` | `tick.trigger`(TriggerIn);`tick`(DataOut) |
+| Sink | `consume` | `consume` | `consume.value`(DataIn) |
+| Probe | `observe` | `observe` | `observe.value`(DataIn) |
+| Buffer | `put` / `flush` | `put` / `flush` | `put.item`(DataIn,APPEND);`flush.trigger`(TriggerIn);`flush`(DataOut) |
+| Join | `join` | `join` | `join.a`、`join.b`(DataIn);`join`(DataOut) |
+| Split | `fan` | `fan` | `fan.value`(DataIn);`fan.out1`、`fan.out2`(DataOut,`outputs=` 扩展) |
+| Latch | `release` | `release` | `release.gate`(SignalIn)、`release.trigger`(TriggerIn)、`release.data`(DataIn,`Gated[int,"gate"]`);`release`(DataOut) |
+| DataToSignal | `convert` | `convert` | `convert.data`(DataIn);`convert`(SignalOut) |
+| SignalToData | `pass_value` | `pass_value` | `pass_value.gate`(SignalIn)、`pass_value.pass`(TriggerIn,`trigger="pass"` 解耦)、`pass_value.x`(DataIn,`Gated[int,"gate"]`,**必须连线**);`pass_value`(DataOut) |
+
+- `Split.fan` 是 Group;`out1` / `out2` 是该组的输出端口,不是独立组名。
+- `SignalToData`:handler 名 `pass_value`(`pass` 是 Python 关键字,不能作
+  函数名);Group identity 仍为 `pass_value`;`trigger="pass"` 仅解耦触发器
+  端口名末段 → `pass_value.pass`。
+- 宿主驱动:`world.run([Injection("src", "tick.trigger", SLOT_TRIGGER, Kind.SIGNAL, True)])`
 - SignalToData 新语义 = 受控源选择:gate LOW → pass 触发即输出 config
   默认;gate HIGH → 必须等 x 数据到达、输出 x
 - Latch/SignalToData 的新形态确认见 §14-3

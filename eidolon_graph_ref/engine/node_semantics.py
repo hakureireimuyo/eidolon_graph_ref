@@ -10,6 +10,7 @@ the orthogonal Data / Signal / Trigger state matrix lives here.
 from __future__ import annotations
 
 from ..model.graph import SLOT_DATA, SLOT_SIGNAL, SLOT_TRIGGER
+from ..model.ports import APPEND
 from .event import Event, Kind
 from .timeline import Entry, KIND_CONSUME
 
@@ -46,7 +47,11 @@ class NodeSemantics:
 
     @classmethod
     def consume(cls, inst, state, node_id: str, port: str) -> None:
-        """Mark a port state's pending events as consumed by this node and port."""
+        """Mark a port state's pending events as consumed by this node and port.
+
+        APPEND 缓存随消费排空:累积语义 = 「自上次消费以来的增量批次」,
+        handler 每次收到的即本次新增;跨消费累积由节点 state 负责。
+        """
 
         seq = inst.timeline.next_seq
         for eid in state.pending_events:
@@ -57,6 +62,8 @@ class NodeSemantics:
             event.consumed_by.append((seq, node_id, port))
         state.pending = False
         state.pending_events = []
+        if getattr(state, "cache", None) == APPEND:
+            state.value = []
 
     @classmethod
     def settle_control_signals(cls, inst, node_id: str) -> None:

@@ -47,7 +47,7 @@ from eidolon_graph_ref.model.assets import AssetIn
 from eidolon_graph_ref.model.definition import DefinitionError, GroupSpec, NodeDefinitionMeta
 from eidolon_graph_ref.model.node_type import NodeType
 from eidolon_graph_ref.model.ports import APPEND, REPLACE, DataIn, DataOut, SignalIn, SignalOut, TriggerIn
-from eidolon_graph_ref.model.readiness import _All, _Any, _Data, _Trigger
+from eidolon_graph_ref.model.readiness import ALL, ANY, DATA, TRIGGER, _All, _Any, _Data, _Trigger
 
 
 # ---- annotation vocabulary --------------------------------------------------
@@ -150,14 +150,13 @@ def group(fn=None, *, readiness=None, defaults=None, outputs=(), trigger=None):
 class _StateProxy:
     """``this`` — a restricted view of node state inside a group function.
 
-    Reads return the snapshot value; writes record whole-value deltas.
-    In-place mutation of a read value mutates the proxy's private copy and
-    records nothing, so it is a no-op by construction.
+    Reads return the snapshot value; the whole snapshot is written back
+    when the group fires, so both whole-value assignment and in-place
+    mutation of a read value take effect (裁定 2026-08-23 修订:全量写回).
     """
 
     def __init__(self, snapshot: dict):
         object.__setattr__(self, "_snapshot", snapshot)
-        object.__setattr__(self, "_delta", {})
 
     def __getattr__(self, name: str):
         try:
@@ -172,11 +171,10 @@ class _StateProxy:
                 f"undeclared state field {name!r} (declared: {sorted(snapshot)})"
             )
         snapshot[name] = value
-        object.__getattribute__(self, "_delta")[name] = value
 
     @property
-    def delta(self) -> dict:
-        return object.__getattribute__(self, "_delta")
+    def snapshot(self) -> dict:
+        return object.__getattribute__(self, "_snapshot")
 
 
 # ---- compilation -------------------------------------------------------------
@@ -392,8 +390,15 @@ def _make_wrapper(fn, params: list[_Param], out_kind, out_names: tuple):
                         f"group with outputs={out_names} must return a {len(out_names)}-tuple, got {result!r}"
                     )
                 out.data_out = dict(zip(out_names, result))
-        if proxy is not None and proxy.delta:
-            out.state = proxy.delta
+        if proxy is not None:
+            out.state = proxy.snapshot  # 全量写回:整值赋值与原地变异均生效
+            # State→Data ownership boundary(裁定 2026-08-23):State 持有对象
+            # 不得直接进入 Data Plane——输出与 state 对象同一引用时,输出侧
+            # 复制解除 alias;Data Plane 内部保持零拷贝共享。
+            owned = tuple(proxy.snapshot.values())
+            for name, value in out.data_out.items():
+                if any(value is v for v in owned):
+                    out.data_out[name] = deepcopy(value)
         return out
 
     return handler
@@ -465,3 +470,44 @@ class NodeDefinition(metaclass=_DSLMeta):
 
     def __new__(cls, *args, **kwargs):
         raise TypeError("NodeDefinition classes are compile-time declarations; use .TYPE in a graph")
+
+
+# ---- unified compile entry for extension nodes -------------------------------
+
+_DSL_VOCABULARY = {
+    "NodeDefinition": NodeDefinition,
+    "group": group,
+    "State": State,
+    "Trigger": Trigger,
+    "Config": Config,
+    "Signal": Signal,
+    "Gated": Gated,
+    "Append": Append,
+    "Asset": Asset,
+    "DATA": DATA,
+    "TRIGGER": TRIGGER,
+    "ALL": ALL,
+    "ANY": ANY,
+}
+
+
+def compile_dsl(source: str, type_name: str) -> NodeType:
+    """Compile DSL source into a NodeType — the unified entry for extension nodes.
+
+    The visual editor registers extension nodes the same way it registers the
+    official pack: compile DSL source → NodeType → put it in the types dict.
+    Port names follow the DSL convention (group-qualified); the editor reads the
+    compiled port declarations, so built-in (flat) and extension (group-qualified)
+    nodes are handled uniformly.
+    """
+    namespace: dict[str, Any] = dict(_DSL_VOCABULARY)
+    try:
+        exec(compile(source, "<eidolon-dsl>", "exec"), namespace)
+    except DefinitionError:
+        raise
+    except Exception as e:
+        raise DefinitionError(f"DSL 编译失败: {type(e).__name__}: {e}") from e
+    cls = namespace.get(type_name)
+    if not (isinstance(cls, type) and issubclass(cls, NodeDefinition) and cls is not NodeDefinition):
+        raise DefinitionError(f"DSL 源码未定义 NodeDefinition 子类 {type_name!r}")
+    return cls.TYPE

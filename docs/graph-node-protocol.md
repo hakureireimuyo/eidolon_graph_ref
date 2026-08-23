@@ -454,8 +454,18 @@ fire 流程:
 | 未声明输出(∉ group.outputs) | 执行期 | KIND_ERROR + 丢弃该输出 |
 
 保留(冻结语义):NodeTurn 预算、值域三入口探针(状态提交/数据产出/宿主
-注入)、零拷贝共享约定(扇出共享载荷引用,节点禁止原地修改输入)、投递
-深度优先、反馈环跨轮迭代、静态/动态吸收。
+注入)、零拷贝共享约定(扇出共享载荷引用;Data payload 进入 Data Plane
+即视为不可变值,节点禁止原地修改输入)、投递深度优先、反馈环跨轮迭代、
+静态/动态吸收。
+
+Ownership 边界(裁定 2026-08-23):State 事务 = 工作副本(每轮 fire
+deepcopy)+ 全量提交(整值赋值与原地变异均生效,失败丢弃);State→Data
+输出不得以隐式 alias 泄漏 state 持有对象——同一引用时输出侧复制;但
+**Move 合法**:节点显式把对象移出 State(`this.items = []; return items`)
+时,ownership 转移给 Data Plane,零拷贝释放(`Buffer.flush` 示范)。
+Data→Data 传播零拷贝。冻结的是「谁拥有对象、谁能改对象」——隐式
+alias 解除需复制,显式 ownership transfer 不复制;复制只发生在解除
+ownership alias 的边界,而非传播路径。
 
 ## 4. 资源访问层
 

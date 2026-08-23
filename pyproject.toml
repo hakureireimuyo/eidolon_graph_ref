@@ -8,5 +8,9 @@ dependencies = []
 [dependency-groups]
 dev = ["pytest>=8"]
 
+[tool.setuptools]
+# eidolon_dsl 是顶层独立模块(DSL 前端,包外),需显式声明才会随包安装
+py-modules = ["eidolon_dsl"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -13,7 +13,7 @@ class Source(NodeDefinition):
     @group(defaults={"step": 1})
     def tick(this, trigger: Trigger, cfg: Config) -> int:
         count = this.count
-        this.count = count + cfg["step"]
+        this.count += cfg["step"]
         return count
 
 
@@ -24,7 +24,7 @@ class Constant(NodeDefinition):
 
 
 class Sink(NodeDefinition):
-    last: State = None
+    last: State[int | None] = None
 
     @group
     def consume(this, value: int) -> None:
@@ -32,11 +32,11 @@ class Sink(NodeDefinition):
 
 
 class Probe(NodeDefinition):
-    log: State[list] = []
+    log: State[list[int]] = []
 
     @group
     def observe(this, value: int) -> None:
-        this.log = [*this.log, value]
+        this.log.append(value)
 
 
 class Buffer(NodeDefinition):
@@ -44,7 +44,7 @@ class Buffer(NodeDefinition):
 
     @group
     def put(this, item: Append[int]) -> None:
-        this.items = list(item)
+        this.items.extend(item)
 
     @group
     def flush(this, trigger: Trigger) -> list:
@@ -55,13 +55,13 @@ class Buffer(NodeDefinition):
 
 class Join(NodeDefinition):
     @group
-    def join(a: int, b: int) -> tuple:
+    def join(a: int, b: int) -> tuple[int, int]:
         return (a, b)
 
 
 class Split(NodeDefinition):
     @group(outputs=("out1", "out2"))
-    def fan(value: int) -> tuple:
+    def fan(value: int) -> tuple[int, int]:
         return (value, value)
 
 

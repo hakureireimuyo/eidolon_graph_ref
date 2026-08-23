@@ -203,17 +203,41 @@ def test_buffer_multi_group_and_no_output():
     assert _errors(world) == []
 
 
-def test_in_place_state_mutation_is_a_no_op():
+def test_in_place_state_mutation_takes_effect():
+    """this 视图全量写回(裁定 2026-08-23):原地变异直接生效,跨 fire 累积。"""
     class Mut(NodeDefinition):
         items: State[list] = []
 
         @group
         def run(this, x: int) -> None:
-            this.items.append(x)  # mutates the proxy's private copy only
+            this.items.append(x)  # 原地变异:fire 结束整个工作副本写回
 
     world = _build(Mut.TYPE)
     world.run([Injection("n", "run.x", SLOT_DATA, Kind.DATA, 1)])
-    assert _state(world)["items"] == []
+    world.run([Injection("n", "run.x", SLOT_DATA, Kind.DATA, 2)])
+    assert _state(world)["items"] == [1, 2]
+    assert _errors(world) == []
+
+def test_state_to_data_ownership_boundary():
+    """State→Data 是 ownership 边界(裁定 2026-08-23):输出 state 持有对象时
+    输出侧复制——变异事件载荷不影响 state;Data Plane 内部仍零拷贝。"""
+    class Emit(NodeDefinition):
+        items: State[list] = []
+
+        @group
+        def load(this, x: list) -> None:
+            this.items = x
+
+        @group
+        def emit(this, trigger: Trigger) -> list:
+            return this.items  # state 持有对象直接输出 → 边界复制
+
+    world = _build(Emit.TYPE)
+    world.run([Injection("n", "load.x", SLOT_DATA, Kind.DATA, [1, 2])])
+    world.run([Injection("n", "emit.trigger", SLOT_TRIGGER, Kind.SIGNAL, True)])
+    (payload,) = _produced(world)
+    payload.append(99)  # 变异事件载荷
+    assert _state(world)["items"] == [1, 2]  # state 不受影响
     assert _errors(world) == []
 
 

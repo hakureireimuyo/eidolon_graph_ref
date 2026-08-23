@@ -281,9 +281,9 @@ def test_nested_readiness_all_of_any_and_trigger():
     assert errors(world) == []
 
 
-# ==================================================================== 10. APPEND 缓存:消费后值保持,继续累积(§九 消费保持)
-def test_append_cache_retains_value_after_consumption():
-    """APPEND 端口:fire 消费 pending 后 value 保持;后续事件在保留值上继续累积。"""
+# ==================================================================== 10. APPEND 缓存:消费后排空,增量批次语义(裁定 2026-08-23)
+def test_append_cache_drains_after_consumption():
+    """APPEND 端口:fire 消费 pending 后 value 排空;后续事件重新累积——每次读到的是自上次消费以来的增量。"""
     t = NodeType(
         name="Acc",
         data_in=(DataIn("items", cache=APPEND),),
@@ -295,5 +295,5 @@ def test_append_cache_retains_value_after_consumption():
     world = make_world(g, {"Acc": t})
     world.run([Injection("n", "items", SLOT_DATA, Kind.DATA, 1)])
     world.run([Injection("n", "items", SLOT_DATA, Kind.DATA, 2)])
-    assert _produced(world) == [[1], [1, 2]]  # 第二次读到的累积含第一轮已消费的值
+    assert _produced(world) == [[1], [2]]  # 已消费的值不重复;跨消费累积由节点 state 负责
     assert errors(world) == []

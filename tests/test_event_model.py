@@ -135,9 +135,13 @@ def test_archive_retains_consumed_events_across_epochs():
 def test_fanout_shares_payload_reference():
     """扇出共享载荷引用(内核零复制):所有下游收到同一个 Python 对象。
 
-    这是「节点不得原地修改输入」约定的动机与锚点:任何分支的原地修改
-    会被其他分支看到,形成隐藏通道、破坏确定性。本测试锁定"共享引用"
-    这一内核事实,防实现漂移(如无意中改为复制)。
+    这是「Data payload 进入 Data Plane 即视为不可变值」的动机与锚点:
+    任何分支的原地修改会被其他分支看到,形成隐藏通道、破坏确定性——
+    违规者无法由当前节点单独确定修改的实际效果(可能被其他节点持有、
+    被多个 fan-out 分支共享、甚至来自另一个节点的 State)。
+    本测试锁定"共享引用"这一内核事实,防实现漂移(如无意中改为复制)。
+    State→Data 输出是唯一例外:ownership 边界,输出侧复制
+    (见 test_dsl_prototype.py::test_state_to_data_ownership_boundary)。
     """
     g = GraphDefinition("share")
     g.add_node("split", "Split")

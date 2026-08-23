@@ -73,7 +73,7 @@ NodeType 的身份是**语义 IR**:DSL 的编译目标、内核的唯一输入�
 | `Config` | 参数 | 组配置访问(合并 `@group(defaults)` + 图配置) | 无端口,参数值 = `ctx.config` |
 | `Signal` | 参数 | 信号依赖(未绑定时可作数据输入) | `SignalIn` |
 | `Gated[T, "gate"]` | 参数 | 数据有效性由 gate 信号参与解释 | `DataIn(signal="...")` |
-| `Append[T]` | 参数 | 累积型输入 | `DataIn(cache=APPEND)` |
+| `Append[T]` | 参数 | 累积型输入(增量批次,消费排空,裁定 2026-08-23) | `DataIn(cache=APPEND)` |
 | `Asset[T]` | 参数 | 资产依赖(节点级声明) | `AssetIn(name, T)` |
 | `State[T] = v` | 类属性 | 节点级状态 | `state_defaults` |
 | `-> T` | 返回值 | 数据输出(名 = 组名) | `DataOut("{group}")` |
@@ -105,8 +105,8 @@ class Counter(NodeDefinition):
 | 用法 | 行为 |
 |---|---|
 | `this.count` | 读当前状态快照 |
-| `this.count = v` / `+=` | 记整值 delta,fire 结束写回(内核 deepcopy 校验) |
-| `this.items.append(x)` | **no-op**:变异作用于代理私有拷贝,delta 为空 |
+| `this.count = v` / `+=` | 整值替换,fire 结束全量写回 |
+| `this.items.append(x)` / `.extend(xs)` | **生效**(裁定 2026-08-23):工作副本上的原地变异随全量提交写回 |
 | `this.nope` | AttributeError → KIND_ERROR(运行期事件化) |
 | `self` 作参数 | 编译期 DefinitionError |
 
@@ -138,7 +138,7 @@ this → special(Trigger / Signal / Config / Asset) → required data → defaul
 | 2 | 端口属于 Group | 端口名限定为 `"{group}.{param}"`;同名参数跨组是**不同端口**(声明层作用域规则,内核零改动) |
 | 3 | 参数默认值 = DataIn fallback | 输入事件缺席时的取值;**与 @group(defaults) 组配置绝不互转**——fallback 属端口声明,defaults 属图配置面 |
 | 4 | 一函数零或一输出 | `-> None` 无输出;`-> T` 唯一输出(名 = 组名);多输出是 `outputs=` 显式扩展,非基础语义 |
-| 5 | this = 仅 State 视图 | 整值替换写入;原地变异 no-op;未声明字段运行期 AttributeError |
+| 5 | this = 仅 State 视图(修订 2026-08-23) | 工作副本 + 全量提交:整值赋值与原地变异均生效;未声明字段运行期 AttributeError;State→Data 输出为 ownership 边界(见 §4-3) |
 | 6 | Gated 绑定位置参数 | `Gated[int, "gate"]`——`by=` 关键字形式是 Python SyntaxError(PEP 637 未落地,已实测),位置参数为唯一合法形态 |
 | 7 | Asset 声明/使用分离 | 签名统一声明;编译器剥离为节点级 `asset_in`;函数体内以**参数值**收到已解析能力对象(构建期注入) |
 | 8 | readiness 缺省可视化 | 缺省 = ALL(组内数据输入) ∧ ANY(触发器)——由参数数量直接可视;自定义走 `@group(readiness=...)`,叶端口自动限定 |
@@ -155,6 +155,26 @@ this → special(Trigger / Signal / Config / Asset) → required data → defaul
 2. **门控信号必须早一个 epoch 到达**(仍成立,属内核调度模型):同一批
    injection 先于上游 firing 投递,数据事件会先于信号事件到达端口(此刻
    电平为初始 None → fallback)。门控信号与数据分属两个 `run()` 调用即可。
+3. **Append = 增量批次语义(裁定 2026-08-23)**:端口缓存随组消费排空,
+   handler 每次收到的是**自上次消费以来**的新增事件列表;跨消费累积由
+   节点 state 负责。镜像缓存到 state(`this.items = list(item)`)是旧语义
+   的写法——flush 清空 state 后旧项会在端口缓存里复活(实测复现),现
+   已改为内核 `consume` 对 APPEND 端口排空 + Buffer `put` 直接列表方法
+   (`this.items.extend(item)`)。
+4. **State→Data ownership 边界(裁定 2026-08-23)**:State 持有的对象不得
+   以**隐式 alias** 进入 Data Plane——handler 输出与 state 持有对象同一
+   引用时,输出侧复制解除 alias(实现于 `_make_wrapper`);Data Plane 内部
+   保持零拷贝共享(`test_fanout_shares_payload_reference` 冻结),Data
+   payload 进入 Data Plane 即视为不可变值。State 事务 = 工作副本 + 全量
+   提交,与 Data Plane 引用共享通过「每轮 fire 重新 deepcopy 工作副本」
+   隔离。跨边界存在两种合法形态:
+   - **Borrow / snapshot**:对象仍属 State,输出侧 detach(deepcopy);
+   - **Move / ownership transfer**:节点显式把对象移出 State
+     (`this.items = []; return items`)——ownership 随输出转移给 Data
+     Plane,零拷贝释放。
+   `Buffer.flush` 即 Move 的示范:积累批次从 State 取走、作为单个数据包
+   释放,此后不再属于 State。这是"谁拥有对象、谁能改对象"模型下唯一
+   允许的跨边界共享形态(显式转移,非隐式 alias)。
 
 ## 5. 验证边界
 
@@ -163,4 +183,4 @@ this → special(Trigger / Signal / Config / Asset) → required data → defaul
   错误行为)
 - 内置 10 节点已全部迁移至 DSL(`eidolon_primitives/nodes.py`),测试套件
   翻转完成:63/63 通过
-- 待办:`Append` 端到端用例(内核已有,Buffer 覆盖);`init` 钩子的 DSL 形态
+- 待办:`init` 钩子的 DSL 形态
