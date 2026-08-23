@@ -9,8 +9,12 @@ dependencies = []
 dev = ["pytest>=8"]
 
 [tool.setuptools]
-# eidolon_dsl 是顶层独立模块(DSL 前端,包外),需显式声明才会随包安装
+# eidolon_dsl 是顶层独立模块(DSL 前端,包外),需显式声明才会随包安装;
+# 顶层模块 + 多包混合布局会禁用 flat-layout 自动发现,包需显式 include
 py-modules = ["eidolon_dsl"]
+
+[tool.setuptools.packages.find]
+include = ["eidolon_graph_ref*", "eidolon_primitives*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
