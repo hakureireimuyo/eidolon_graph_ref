@@ -28,6 +28,19 @@ def _refs(pred) -> set[str]:
 
 
 @dataclass(frozen=True)
+class DocSection:
+    """说明书一节(标题 + 行文本)。"""
+    title: str
+    lines: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DocSpec:
+    """节点说明书(描述层元数据,执行路径禁止读取;与 tags 同层)。"""
+    summary: str
+    sections: tuple[DocSection, ...] = ()
+
+@dataclass(frozen=True)
 class Group:
     """One independently callable node interface."""
     name: str
@@ -54,6 +67,7 @@ class NodeType:
     groups: tuple[Group, ...] = ()
     tags: tuple[str, ...] = ()
     init: Any = None
+    doc: DocSpec | None = None
     def __post_init__(self) -> None:
         """组间不变式:契约非法状态不可构造(校验内联进 IR,而非外部校验器)。
 
@@ -144,4 +158,6 @@ class NodeType:
                 "asset_in": [{"name": p.name, "type": p.type.__name__ if p.type else None} for p in self.asset_in],
                 "state_defaults": dict(self.state_defaults), "init_defaults": dict(self.init_defaults), "tags": list(self.tags),
                 "groups": [{"name": g.name, "inputs": list(g.inputs), "triggers": list(g.triggers), "outputs": list(g.outputs), "defaults": dict(g.defaults), "has_handler": g.handler is not None, "readiness": repr(g.readiness)} for g in self.groups],
-                "has_init": self.init is not None, "is_signal_node": self.is_signal_node}
+                "has_init": self.init is not None, "is_signal_node": self.is_signal_node,
+                "doc": None if self.doc is None else {"summary": self.doc.summary,
+                      "sections": [{"title": s.title, "lines": list(s.lines)} for s in self.doc.sections]}}

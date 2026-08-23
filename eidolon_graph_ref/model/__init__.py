@@ -2,7 +2,7 @@
 
 from .assets import AssetIn, AssetRef
 from .graph import GraphDefinition, NodeSpec, Wire, SLOT_DATA, SLOT_TRIGGER, SLOT_SIGNAL
-from .node_type import Group, NodeType
+from .node_type import DocSection, DocSpec, Group, NodeType
 from .definition import DefinitionError, GroupSpec, NodeDefinition
 from .readiness import ALL, ANY, DATA, TRIGGER
 from .ports import APPEND, REPLACE, DataIn, DataOut, SignalIn, SignalOut, TriggerIn
@@ -19,6 +19,8 @@ __all__ = [
     "SLOT_SIGNAL",
     "Group",
     "NodeType",
+    "DocSection",
+    "DocSpec",
     "DefinitionError",
     "GroupSpec",
     "NodeDefinition",
