@@ -85,8 +85,11 @@ NodeType 的身份是**语义 IR**:DSL 的编译目标、内核的唯一输入�
 ```python
 @group(readiness=ANY("a", "b"))     # 缺省 = ALL(数据输入) ∧ ANY(触发器)
 @group(defaults={"mode": "truthy"}) # 组 config 缺省(图可覆写,≠ 参数默认值)
-@group(outputs=("out1", "out2"))    # 多输出扩展(必须配 tuple 返回);端口按裁定 2
-                                    # 限定为 "fan.out1"/"fan.out2"
+@group(outputs=("out1", "out2"))    # 多数据输出声明;端口按裁定 2 限定为
+                                    # "fan.out1"/"fan.out2"
+@group(outputs=("gt",), signals=("a_gt_b",))
+                                    # 同组数据+信号输出:signals= 必须配 outputs=
+                                    # (纯信号输出仍走 -> Signal[bool],裁定 12)
 @group(trigger="pass")              # 触发器端口名与参数名解耦(撞关键字等)
 ```
 
@@ -128,7 +131,35 @@ this → special(Trigger / Signal / Config / Asset) → required data → defaul
 | `-> None`(或无 return 注解) | 无输出事件;`return None` 与无 return 等价 |
 | `-> T` | 数据输出事件,端口名 = 组名 |
 | `-> Signal[bool]` | 信号输出事件 |
-| `@group(outputs=(a, b))` + tuple 返回 | 位置一一对应 `return[0]→a`;数量不符编译期报错 |
+| `@group(outputs=(a, b))` | 声明输出端口数 ≥ 2 → dict 返回协议(裁定 12) |
+| `@group(outputs=..., signals=...)` | 数据+信号输出同组声明(dict 键按声明分派) |
+
+**多输出返回协议(裁定 12,2026-08-23)**:声明输出端口数决定 handler 返回
+形态——恰 1 个 → 裸值返回(同 `-> T` / `-> Signal[bool]` 单输出裁定 4);
+≥ 2 个 → dict 返回,键 = `outputs=`/`signals=` 声明成员名(未限定,由
+编译器映射到组限定端口),缺失键 = 该端口本轮无事件,None 值 = 合法载荷
+照发;键不在声明集 → 运行期 TypeError → KIND_ERROR;声明 0 个输出端口却
+返回载荷 → 同样 KIND_ERROR(「写必须声明」)。`signals=` 声明信号输出
+端口,必须配 `outputs=`;`spec.outputs` = 数据+信号端口全集。
+
+### 2.6 tags / doc —— 只读声明函数(描述层)
+
+```python
+class Clock(NodeDefinition):
+    @staticmethod
+    def tags() -> tuple[str, ...]:
+        return ("category:source", "tick:tick.trigger")
+
+    @staticmethod
+    def doc() -> DocSpec:
+        return DocSpec("摘要", sections=(...))
+```
+
+基类 `NodeDefinition` 声明这两个函数的默认实现(`()` / `None`),具体节点
+以 `@staticmethod` **显式重载**;声明是只读纯函数(零参数、无副作用),编译期
+求值一次,结果进入 NodeType 元数据(描述层定位不变:执行路径禁止读取)。
+类属性赋值形式编译期 DefinitionError。未重载的节点 = 无 tag / 无说明书
+(编辑器侧落 custom 分类与「暂无说明」兜底)。
 
 ## 3. 语义裁定表
 
@@ -145,6 +176,7 @@ this → special(Trigger / Signal / Config / Asset) → required data → defaul
 | 9 | 错误分两期 | 编译期 DefinitionError(类定义时爆炸:签名/顺序/绑定/声明合法性);运行期 handler 异常 → KIND_ERROR 事件,执行不中断 |
 | 10 | 继承闸门沿用 | 具体节点定义间禁止行为继承;共享行为走普通材料类(与 graph-node-protocol.md §2.0 一致) |
 | 11 | Config 显式通道 | 函数体读取组配置的唯一通道是 `cfg: Config` 参数(值 = defaults ∪ 图配置);`this` 保持仅 State 视图 |
+| 12 | 多输出返回协议(2026-08-23) | 声明输出端口数决定返回形态:恰 1 个 → 裸值;≥ 2 个 → dict(键=outputs=/signals= 声明成员名,编译器映射组限定端口;缺失键=该端口本轮无事件,None=合法载荷照发);`signals=` 声明信号输出端口(必须配 `outputs=`,纯信号走 `-> Signal[bool]`);未知键/0 输出返回载荷 → KIND_ERROR |
 
 ## 4. 已知语义事实(原型实测)
 

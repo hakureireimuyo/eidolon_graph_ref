@@ -61,8 +61,8 @@ class Join(NodeDefinition):
 
 class Split(NodeDefinition):
     @group(outputs=("out1", "out2"))
-    def fan(value: int) -> tuple[int, int]:
-        return (value, value)
+    def fan(value: int) -> dict:
+        return {"out1": value, "out2": value}
 
 
 class Latch(NodeDefinition):

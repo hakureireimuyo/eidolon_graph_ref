@@ -18,8 +18,10 @@ The DSL borrows Python *syntax*, not Python semantics:
 - parameter default == DataIn fallback for an absent input event (NOT a
   graph-config default; ``@group(defaults=...)`` is the config surface)
 - return annotation == output declaration; ``-> None`` == no output event;
-  ``-> Signal[bool]`` == signal output; ``@group(outputs=(...))`` plus a
-  tuple return is the multi-output extension
+  ``-> Signal[bool]`` == signal output; ``@group(outputs=(...))`` and
+  ``@group(signals=(...))`` declare multiple data / signal outputs — the
+  handler then returns a dict keyed by declared port name (a missing key ==
+  no event for that port; a None value is a legal payload emitted as-is)
 - ``this`` (optional first parameter) == restricted state view: reads and
   whole-value writes only; in-place mutation of a ``this.x`` value is a
   no-op; undeclared fields raise AttributeError (recorded as KIND_ERROR)
@@ -29,6 +31,11 @@ The DSL borrows Python *syntax*, not Python semantics:
   positional argument is the binding target
 - port names are group-qualified: ``"{group}.{param}"`` — ports belong to
   groups, so two groups may declare parameters with the same name
+- ``tags`` / ``doc`` are read-only declaration functions (裁定 2026-08-23):
+  the base ``NodeDefinition`` declares them with defaults ``()`` / ``None``,
+  concrete nodes explicitly override them via ``@staticmethod``; the compiler
+  evaluates each once at class creation — class-attribute assignment is a
+  compile-time DefinitionError
 
 The compiler reuses the existing ``GroupSpec → NodeType`` pipeline: the
 compiled ``NodeType`` is exactly the IR the kernel consumes, and the kernel
@@ -45,7 +52,7 @@ from typing import Any, get_type_hints
 from eidolon_graph_ref.engine.protocol import GroupOutput
 from eidolon_graph_ref.model.assets import AssetIn
 from eidolon_graph_ref.model.definition import DefinitionError, GroupSpec, NodeDefinitionMeta
-from eidolon_graph_ref.model.node_type import NodeType
+from eidolon_graph_ref.model.node_type import DocSpec, NodeType
 from eidolon_graph_ref.model.ports import APPEND, REPLACE, DataIn, DataOut, SignalIn, SignalOut, TriggerIn
 from eidolon_graph_ref.model.readiness import ALL, ANY, DATA, TRIGGER, _All, _Any, _Data, _Trigger
 
@@ -125,17 +132,24 @@ class _GroupOpts:
     readiness: Any = None
     defaults: dict = field(default_factory=dict)
     outputs: tuple = ()
+    signals: tuple = ()
     trigger: str | None = None
 
 
-def group(fn=None, *, readiness=None, defaults=None, outputs=(), trigger=None):
+def group(fn=None, *, readiness=None, defaults=None, outputs=(), signals=(), trigger=None):
     """Declare the decorated function as an Eidolon Group.
 
     Decoration only tags the function for the ``NodeDefinition`` metaclass;
     the function is never invoked as a Python method at runtime.
     """
 
-    opts = _GroupOpts(readiness=readiness, defaults=dict(defaults or {}), outputs=tuple(outputs or ()), trigger=trigger)
+    opts = _GroupOpts(
+        readiness=readiness,
+        defaults=dict(defaults or {}),
+        outputs=tuple(outputs or ()),
+        signals=tuple(signals or ()),
+        trigger=trigger,
+    )
 
     def deco(fn):
         setattr(fn, "_eidolon_group", opts)
@@ -270,7 +284,10 @@ def _compile_group(cls_name: str, fn, opts: _GroupOpts):
             elif phase == "defaulted":
                 raise DefinitionError(f"{cls_name}.{gname}: required data input {p.name!r} must precede defaulted inputs")
 
-    # outputs
+    # outputs — 裁定(2026-08-23):声明输出端口数决定 handler 返回形态;
+    # 1 个 → 裸值;≥2 → dict(键 = 声明端口名,缺失键 = 该端口本轮无事件,
+    # None 值 = 合法载荷照发)。signals= 声明信号输出端口,必须配 outputs=
+    # (纯信号输出仍走 ``-> Signal[bool]`` 单输出裸值形态)。
     ret = hints.get("return", inspect.Signature.empty)
     if ret is inspect.Signature.empty or ret is None or ret is type(None):
         out_kind = None
@@ -278,12 +295,19 @@ def _compile_group(cls_name: str, fn, opts: _GroupOpts):
         out_kind = "signal"
     else:
         out_kind = "data"
+    if opts.signals and not opts.outputs:
+        raise DefinitionError(f"{cls_name}.{gname}: signals= requires outputs=")
     if opts.outputs:
         if out_kind != "data":
             raise DefinitionError(f"{cls_name}.{gname}: outputs= requires a data return annotation")
-        out_names = tuple(f"{gname}.{n}" for n in opts.outputs)  # 裁定 2:所有端口组限定
+        data_names = tuple(f"{gname}.{n}" for n in opts.outputs)  # 裁定 2:所有端口组限定
+        signal_names = tuple(f"{gname}.{n}" for n in opts.signals)
+        data_keys = tuple(opts.outputs)   # dict 协议键 = 声明成员名(未限定)
+        signal_keys = tuple(opts.signals)
     else:
-        out_names = (gname,) if out_kind else ()
+        data_names = (gname,) if out_kind == "data" else ()
+        signal_names = (gname,) if out_kind == "signal" else ()
+        data_keys, signal_keys = (), ()
 
     # port tables
     data_ins, signal_ins, trigger_ins, asset_ins = [], [], [], []
@@ -333,19 +357,19 @@ def _compile_group(cls_name: str, fn, opts: _GroupOpts):
         name=gname,
         inputs=tuple(inputs),
         triggers=triggers,
-        outputs=out_names,
+        outputs=data_names + signal_names,
         defaults=dict(opts.defaults),
         handler=gname,
         readiness=_qualify_readiness(opts.readiness, gname),
     )
-    wrapper = _make_wrapper(fn, params, out_kind, out_names)
+    wrapper = _make_wrapper(fn, params, data_names, signal_names, data_keys, signal_keys)
     ports = {
         "data": data_ins,
         "signal": signal_ins,
         "trigger": trigger_ins,
         "asset": asset_ins,
-        "out_data": [DataOut(n) for n in out_names] if out_kind == "data" else [],
-        "out_signal": [SignalOut(n) for n in out_names] if out_kind == "signal" else [],
+        "out_data": [DataOut(n) for n in data_names],
+        "out_signal": [SignalOut(n) for n in signal_names],
     }
     return spec, wrapper, ports
 
@@ -364,7 +388,7 @@ def _qualify_readiness(pred, gname: str):
     raise DefinitionError(f"unsupported readiness predicate {pred!r}")
 
 
-def _make_wrapper(fn, params: list[_Param], out_kind, out_names: tuple):
+def _make_wrapper(fn, params: list[_Param], data_names: tuple, signal_names: tuple, data_keys: tuple, signal_keys: tuple):
     def handler(ctx):
         proxy = _StateProxy(deepcopy(ctx.state)) if any(p.role == "this" for p in params) else None
         args = []
@@ -379,17 +403,39 @@ def _make_wrapper(fn, params: list[_Param], out_kind, out_names: tuple):
                 args.append(ctx.assets.get(p.name))
         result = fn(*args)
         out = GroupOutput()
-        if result is not None and out_names:
-            if out_kind == "signal":
-                out.signal_out[out_names[0]] = result
-            elif len(out_names) == 1:
-                out.data_out[out_names[0]] = result
+        total = len(data_names) + len(signal_names)
+        if result is not None:
+            if total == 0:
+                # 「写必须声明」:无输出端口的组返回载荷属违规产出(裁定收紧)。
+                raise TypeError(f"group declares no outputs but handler returned {result!r}")
+            if total == 1:
+                name = data_names[0] if data_names else signal_names[0]
+                if data_names:
+                    out.data_out[name] = result
+                else:
+                    out.signal_out[name] = result
             else:
-                if not isinstance(result, tuple) or len(result) != len(out_names):
+                # dict 返回协议(裁定 2026-08-23):键 = outputs=/signals= 声明
+                # 成员名(未限定),编译器映射到组限定端口;缺失键 = 该端口
+                # 本轮无事件;None 值 = 合法载荷照发;未知键 = 违规产出。
+                if not isinstance(result, dict):
                     raise TypeError(
-                        f"group with outputs={out_names} must return a {len(out_names)}-tuple, got {result!r}"
+                        f"group with {total} declared outputs must return a dict "
+                        f"mapping declared output names to payloads, got {result!r}"
                     )
-                out.data_out = dict(zip(out_names, result))
+                declared = set(data_keys) | set(signal_keys)
+                unknown = set(result) - declared
+                if unknown:
+                    raise TypeError(
+                        f"undeclared output name(s) {sorted(unknown)}; "
+                        f"declared outputs are {sorted(declared)}"
+                    )
+                for key, port in zip(data_keys, data_names):
+                    if key in result:
+                        out.data_out[port] = result[key]
+                for key, port in zip(signal_keys, signal_names):
+                    if key in result:
+                        out.signal_out[port] = result[key]
         if proxy is not None:
             out.state = proxy.snapshot  # 全量写回:整值赋值与原地变异均生效
             # State→Data ownership boundary(裁定 2026-08-23):State 持有对象
@@ -459,7 +505,21 @@ class _DSLMeta(NodeDefinitionMeta):
         namespace["asset_in"] = tuple(asset_ins)
         namespace["state_defaults"] = state_defaults
         namespace.setdefault("init_defaults", {})
-        namespace.setdefault("tags", ())
+        # tags / doc:只读声明函数(裁定 2026-08-23)。基类 NodeDefinition 声明
+        # 默认实现,具体节点以 @staticmethod 显式重载;编译期求值一次,结果
+        # 进入 NodeType 元数据。类属性赋值形式编译期拒绝。
+        for decl_name, default in (("tags", ()), ("doc", None)):
+            decl = namespace.get(decl_name)
+            if decl is None:
+                namespace[decl_name] = default
+                continue
+            if isinstance(decl, staticmethod):
+                decl = decl.__func__
+            if not callable(decl):
+                raise DefinitionError(
+                    f"{name}: {decl_name} must be a read-only @staticmethod function, got {decl!r}"
+                )
+            namespace[decl_name] = decl()
         return super().__new__(mcls, name, bases, namespace, **kw)
 
 
@@ -470,6 +530,22 @@ class NodeDefinition(metaclass=_DSLMeta):
 
     def __new__(cls, *args, **kwargs):
         raise TypeError("NodeDefinition classes are compile-time declarations; use .TYPE in a graph")
+
+    @staticmethod
+    def tags() -> tuple[str, ...]:
+        """只读声明函数(描述层):域分类 / 宿主约定 tags,编译期求值一次。
+
+        具体节点显式重载;未重载 = 无 tag(编辑器侧落 custom 分类)。
+        """
+        return ()
+
+    @staticmethod
+    def doc() -> DocSpec | None:
+        """只读声明函数(描述层):节点说明书,编译期求值一次。
+
+        具体节点显式重载;未重载 = 无说明书(编辑器侧显示占位)。
+        """
+        return None
 
 
 # ---- unified compile entry for extension nodes -------------------------------

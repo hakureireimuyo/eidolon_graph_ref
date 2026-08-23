@@ -113,6 +113,7 @@ class NodeDefinitionMeta(type):
                 groups=tuple(compiled),
                 tags=tuple(getattr(cls, "tags", ())),
                 init=getattr(cls, "init", None),
+                doc=getattr(cls, "doc", None),
             )
         except ValueError as e:
             raise DefinitionError(f"{cls.__name__}: {e}") from e

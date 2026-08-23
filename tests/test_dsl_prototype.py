@@ -7,7 +7,7 @@ Plus the two group-scoping and error-behavior cases the baseline implies.
 """
 import pytest
 
-from eidolon_dsl import Asset, Gated, NodeDefinition, Signal, State, Trigger, group
+from eidolon_dsl import Asset, Config, Gated, NodeDefinition, Signal, State, Trigger, group
 from eidolon_graph_ref.engine import GraphInstance, Injection, Kind
 from eidolon_graph_ref.engine.timeline import KIND_ERROR
 from eidolon_graph_ref.model import (
@@ -303,3 +303,157 @@ def test_asset_parameter_receives_resolved_capability():
     world.run([Injection("n", "query.sql", SLOT_DATA, Kind.DATA, "SELECT 1")])
     assert _produced(world) == [["db-1:SELECT 1"]]
     assert _errors(world) == []
+
+# ---- 裁定 12:signals= + dict 返回协议(2026-08-23) ------------------------------
+
+
+class ThreshDs(NodeDefinition):
+    @group(outputs=("over", "under"), defaults={"limit": 5})
+    def check(cfg: Config, value: int) -> dict:
+        if value >= cfg["limit"]:
+            return {"over": value}
+        return {"under": value}
+
+
+class CmpDs(NodeDefinition):
+    @group(outputs=("gt", "eq"), signals=("a_gt_b",))
+    def compare(a, b) -> dict:
+        gt = a is not None and b is not None and a > b
+        return {"gt": gt, "eq": a is not None and b is not None and a == b, "a_gt_b": gt}
+
+
+def _port_events(world, port: str, node: str = "n"):
+    return [e for e in world.timeline.events.values() if e.producer == node and e.port == port]
+
+
+def test_signals_compiles_to_three_tables():
+    assert [p.name for p in CmpDs.TYPE.data_out] == ["compare.gt", "compare.eq"]
+    assert [p.name for p in CmpDs.TYPE.signal_out] == ["compare.a_gt_b"]
+    assert CmpDs.TYPE.group("compare").outputs == ("compare.gt", "compare.eq", "compare.a_gt_b")
+
+
+def test_dict_protocol_branches_emit_only_one_side():
+    world = _build(ThreshDs.TYPE)
+    world.run([Injection("n", "check.value", SLOT_DATA, Kind.DATA, 7)])
+    world.run([Injection("n", "check.value", SLOT_DATA, Kind.DATA, 2)])
+    assert [e.payload for e in _port_events(world, "check.over")] == [7]
+    assert [e.payload for e in _port_events(world, "check.under")] == [2]
+    assert _errors(world) == []
+
+
+def test_dict_protocol_none_value_is_legal_payload():
+    class NoneEmits(NodeDefinition):
+        @group(outputs=("a", "b"))
+        def run(x: int) -> dict:
+            return {"a": None}  # None = 合法载荷照发;b 缺失 = 无事件
+
+    world = _build(NoneEmits.TYPE)
+    world.run([Injection("n", "run.x", SLOT_DATA, Kind.DATA, 1)])
+    a_events = _port_events(world, "run.a")
+    assert len(a_events) == 1 and a_events[0].payload is None
+    assert _port_events(world, "run.b") == []
+    assert _errors(world) == []
+
+
+def test_dict_protocol_mixed_data_and_signal_outputs():
+    world = _build(CmpDs.TYPE)
+    world.run([Injection("n", "compare.a", SLOT_DATA, Kind.DATA, 5),
+               Injection("n", "compare.b", SLOT_DATA, Kind.DATA, 3)])
+    assert [e.payload for e in _port_events(world, "compare.gt")] == [True]
+    assert [e.payload for e in _port_events(world, "compare.eq")] == [False]
+    assert [e.payload for e in _port_events(world, "compare.a_gt_b")] == [True]
+    assert _errors(world) == []
+
+
+def test_dict_protocol_unknown_key_records_kind_error():
+    class BadKey(NodeDefinition):
+        @group(outputs=("a", "b"))
+        def run(x: int) -> dict:
+            return {"nope": x}
+
+    world = _build(BadKey.TYPE)
+    world.run([Injection("n", "run.x", SLOT_DATA, Kind.DATA, 1)])
+    assert _produced(world) == []
+    assert any("undeclared output name" in m for m in _errors(world))
+
+
+def test_dict_protocol_non_dict_return_records_kind_error():
+    class BadRet(NodeDefinition):
+        @group(outputs=("a", "b"))
+        def run(x: int) -> tuple:
+            return (x, x)
+
+    world = _build(BadRet.TYPE)
+    world.run([Injection("n", "run.x", SLOT_DATA, Kind.DATA, 1)])
+    assert _produced(world) == []
+    assert any("must return a dict" in m for m in _errors(world))
+
+
+def test_zero_output_group_returning_payload_records_kind_error():
+    class BadNone(NodeDefinition):
+        @group
+        def run(x: int) -> None:
+            return x  # -> None 组返回载荷:违规产出
+
+    world = _build(BadNone.TYPE)
+    world.run([Injection("n", "run.x", SLOT_DATA, Kind.DATA, 1)])
+    assert _produced(world) == []
+    assert any("declares no outputs" in m for m in _errors(world))
+
+
+def test_signals_requires_outputs():
+    with pytest.raises(DefinitionError, match="signals= requires outputs="):
+        class Bad(NodeDefinition):
+            @group(signals=("s",))
+            def run(x: int) -> dict:
+                return {"s": True}
+
+
+def test_doc_and_tags_readonly_declaration_functions():
+    """tags/doc 只读声明函数(裁定 2026-08-23):@staticmethod 显式重载,编译期求值一次。"""
+    from eidolon_graph_ref.model.node_type import DocSection, DocSpec
+
+    class Documented(NodeDefinition):
+        @group
+        def run(x: int) -> int:
+            return x
+
+        @staticmethod
+        def tags() -> tuple[str, ...]:
+            return ("category:test",)
+
+        @staticmethod
+        def doc() -> DocSpec:
+            return DocSpec("摘要", sections=(DocSection("行为", lines=("第一行",)),))
+
+    assert Documented.TYPE.doc.summary == "摘要"
+    assert Documented.TYPE.doc.sections[0].lines == ("第一行",)
+    assert Documented.TYPE.tags == ("category:test",)
+
+
+def test_tags_doc_default_to_empty_when_not_overridden():
+    """未重载声明函数的节点:tags = ()、doc = None(基类默认,compile_dsl 脚本节点同路径)。"""
+    assert Add.TYPE.tags == ()
+    assert Add.TYPE.doc is None
+
+
+def test_tags_declared_as_attribute_is_rejected():
+    with pytest.raises(DefinitionError, match="read-only @staticmethod"):
+        class Bad(NodeDefinition):
+            tags = ("category:x",)
+
+            @group
+            def run(x: int) -> int:
+                return x
+
+
+def test_doc_declared_as_attribute_is_rejected():
+    from eidolon_graph_ref.model.node_type import DocSpec
+
+    with pytest.raises(DefinitionError, match="read-only @staticmethod"):
+        class Bad(NodeDefinition):
+            doc = DocSpec("摘要")
+
+            @group
+            def run(x: int) -> int:
+                return x
