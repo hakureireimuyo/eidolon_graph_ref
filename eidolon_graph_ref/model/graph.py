@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Mapping
 
 from .assets import AssetRef
 
@@ -96,8 +97,13 @@ class GraphDefinition:
 
     # ---- 查询 ---------------------------------------------------------------
     @property
-    def nodes(self) -> dict[str, NodeSpec]:
-        return dict(self._nodes)
+    def nodes(self) -> Mapping[str, NodeSpec]:
+        """节点表（只读视图；拓扑不可变，防御性拷贝改为 O(1) 代理）。
+
+        引擎热路径每 fire 多次索引本表；dict 拷贝是 O(n) 浪费。
+        调用方仅读（索引/迭代），proxy 保证不可变。
+        """
+        return MappingProxyType(self._nodes)
 
     @property
     def wires(self) -> tuple[Wire, ...]:

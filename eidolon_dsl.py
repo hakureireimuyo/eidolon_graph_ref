@@ -390,7 +390,12 @@ def _qualify_readiness(pred, gname: str):
 
 def _make_wrapper(fn, params: list[_Param], data_names: tuple, signal_names: tuple, data_keys: tuple, signal_keys: tuple):
     def handler(ctx):
-        proxy = _StateProxy(deepcopy(ctx.state)) if any(p.role == "this" for p in params) else None
+    has_state = any(p.role == "this" for p in params)
+
+    def handler(ctx):
+        # ctx.state 已是 executor 侧为本次 fire 建的私有快照,直接接管——
+        # 无需二次 deepcopy(每 fire 省一次拷贝,热点路径)。
+        proxy = _StateProxy(ctx.state) if has_state else None
         args = []
         for p in params:
             if p.role == "this":
