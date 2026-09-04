@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from .engine.timeline import Entry, Timeline, KIND_CONSUME, KIND_DELIVER, KIND_ERROR, KIND_FIRE, KIND_QUIESCE
+from .engine.timeline import Entry, Timeline, KIND_CONSUME, KIND_DELIVER, KIND_ERROR, KIND_FIRE, KIND_QUIESCE, KIND_READINESS_FAILED
 
 
 def _short(payload) -> str:
@@ -39,6 +39,10 @@ def _render_entry(e: Entry) -> str:
         consumed = ",".join(f"#{c}" for c in e.consumed)
         msg = f"  ({e.message})" if e.message else ""
         return f"{prefix}{e.dst_node}.{e.dst_port} events [{consumed}]{msg}"
+    if e.kind == KIND_READINESS_FAILED:
+        lines = [f"{prefix}{e.dst_node}.{e.group}: readiness failed"]
+        lines.extend(f"      {line}" for line in (e.message or "").splitlines())
+        return "\n".join(lines)
     if e.kind == KIND_ERROR:
         return f"{prefix}{e.dst_node}.{e.group}: {e.message}"
     if e.kind == KIND_QUIESCE:
@@ -80,4 +84,20 @@ def render_state(observable: dict) -> str:
         lines.append(f"  {nid:<10} [{view['type']}] state: {st}")
         for port in ports:
             lines.append(f"    {port}")
+    return "\n".join(lines)
+
+
+def render_readiness_trace(timeline: Timeline, node_id: str, group_name: str) -> str:
+    """某组最近的就绪失败评估（调试追踪，需 EIDOLON_DEBUG=1 才有记录）。"""
+    entries = [
+        e
+        for e in timeline.entries
+        if e.kind == KIND_READINESS_FAILED and e.dst_node == node_id and e.group == group_name
+    ]
+    if not entries:
+        return f"√ {node_id}.{group_name}: readiness never failed"
+    lines = [f"× {node_id}.{group_name}: readiness evaluations:"]
+    for entry in entries[-5:]:  # 最后 5 次
+        lines.append(f"  epoch {entry.run}:")
+        lines.extend(f"    {line}" for line in (entry.message or "").splitlines())
     return "\n".join(lines)

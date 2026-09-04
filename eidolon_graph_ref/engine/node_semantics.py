@@ -9,10 +9,17 @@ the orthogonal Data / Signal / Trigger state matrix lives here.
 """
 from __future__ import annotations
 
+import os
+
 from ..model.graph import SLOT_DATA, SLOT_SIGNAL, SLOT_TRIGGER
 from ..model.ports import APPEND
 from .event import Event, Kind
-from .timeline import Entry, KIND_CONSUME
+from .timeline import Entry, KIND_CONSUME, KIND_READINESS_FAILED
+
+# 调试模式(REFACTOR_READINESS_VALIDATION):时间线记录 readiness 失败。
+# 默认关闭——失败评估是正常图运转的一部分(唤醒≠ready),无差别记录会
+# 淹没确定性时间线;EIDOLON_DEBUG=1 开启,供可视化调试与 console 追踪。
+RECORD_READINESS_FAILURES = os.environ.get("EIDOLON_DEBUG") == "1"
 
 
 class NodeSemantics:
@@ -170,10 +177,21 @@ class NodeSemantics:
     @classmethod
     def group_ready(cls, inst, node_id: str, group) -> bool:
         if group.readiness is not None:
-            return group.readiness.evaluate(
-                lambda port: cls.data_ready(inst, node_id, port),
-                lambda port: inst.trigger_states[node_id][port].facts.pending,
-            )
+            data = lambda port: cls.data_ready(inst, node_id, port)
+            trigger = lambda port: inst.trigger_states[node_id][port].facts.pending
+            result = group.readiness.evaluate(data, trigger)
+            if not result and RECORD_READINESS_FAILURES:
+                # 调试模式:失败即记录 explain() 全文,供 console 追踪"为什么不火"
+                inst.timeline.record(
+                    Entry(
+                        run=inst.run_no,
+                        kind=KIND_READINESS_FAILED,
+                        dst_node=node_id,
+                        group=group.name,
+                        message=group.readiness.explain(data, trigger),
+                    )
+                )
+            return result
         data_ready = all(cls.data_ready(inst, node_id, port) for port in group.inputs)
         trigger_ready = any(inst.trigger_states[node_id][port].facts.pending for port in group.triggers) if group.triggers else True
         if not trigger_ready:

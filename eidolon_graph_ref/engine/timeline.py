@@ -18,6 +18,7 @@ from .event import Event
 KIND_DELIVER = "deliver"  # 事件投递（宿主注入与节点产出同构；src=None = 宿主）
 KIND_FIRE = "fire"  # 组执行（消费哪些事件、产出哪些事件）
 KIND_CONSUME = "consume"  # 无执行的 pending 消费（绑定信号的控制态更新,level 保持）
+KIND_READINESS_FAILED = "readiness_failed"  # 组就绪谓词评估失败（调试模式记录,见 REFACTOR_READINESS_VALIDATION）
 KIND_ERROR = "error"  # tick 异常或声明违规
 KIND_QUIESCE = "quiesce"  # 队列排空，epoch 静止
 

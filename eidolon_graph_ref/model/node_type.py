@@ -14,17 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from .assets import AssetIn
 from .ports import DataIn, DataOut, SignalIn, SignalOut, TriggerIn
-from .readiness import Readiness, _All, _Any, _Data, _Trigger
-
-def _refs(pred) -> set[str]:
-    """Readiness 谓词引用的端口集合(供组间不变式校验)。"""
-    if pred is None:
-        return set()
-    if isinstance(pred, (_Data, _Trigger)):
-        return {pred.port}
-    if isinstance(pred, (_All, _Any)):
-        return set().union(*(_refs(c) for c in pred.conds))
-    return set()
+from .readiness import Readiness
 
 
 @dataclass(frozen=True)
@@ -131,7 +121,7 @@ class NodeType:
                 if o in output_owner:
                     _err(f"output {o!r} belongs to both {output_owner[o]!r} and {g.name!r}")
                 output_owner[o] = g.name
-            if g.readiness is not None and not _refs(g.readiness) <= set(g.inputs) | set(g.triggers):
+            if g.readiness is not None and not g.readiness.referenced_ports() <= set(g.inputs) | set(g.triggers):
                 _err(f"group {g.name!r}: readiness references non-group port")
         for p in allowed_inputs:
             if p not in input_owner:
