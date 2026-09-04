@@ -8,9 +8,10 @@
 
 from eidolon_graph_ref.engine.event import Delivery, Event, Injection, Kind
 from eidolon_graph_ref.engine.node_semantics import NodeSemantics
-from eidolon_graph_ref.engine.port_state import DataPortState, SignalPortState, TriggerPortState
+from eidolon_graph_ref.engine.port_state import PortInvariants, PortState
 from eidolon_graph_ref.engine.timeline import Timeline
 from eidolon_graph_ref.model.graph import GraphDefinition, SLOT_DATA, SLOT_SIGNAL, SLOT_TRIGGER
+from eidolon_graph_ref.model.ports import APPEND, REPLACE
 
 from conftest import fired, make_world
 
@@ -32,16 +33,26 @@ def _delivery(eid=1, node="sink", port="in.value", slot=SLOT_DATA) -> Delivery:
     return Delivery(eid, node, port, slot, seq=1)
 
 
+def _state(port_type="data", wired=False, cache_strategy=REPLACE) -> PortState:
+    return PortState(
+        PortInvariants(
+            port_type=port_type,
+            is_wired=wired,
+            cache_strategy=cache_strategy if port_type == "data" else None,
+        )
+    )
+
+
 def test_delivery_linking_consume_clears():
     """链接不变式:receive 把 Delivery 挂到端口状态;consume 标记消费并清空。"""
     event = _data_event()
     delivery = _delivery()
     event.deliveries.append(delivery)
-    state = DataPortState()
+    state = _state()
     state.receive(event, delivery)
 
     assert state.pending_deliveries == [delivery]  # 直接引用,同对象
-    assert state.pending is True
+    assert state.facts.pending is True
 
     inst = _MiniInst([event])
     seq = inst.timeline.next_seq
@@ -49,7 +60,7 @@ def test_delivery_linking_consume_clears():
 
     assert delivery.consumed_seq == seq  # 消费时的 next_seq
     assert ids == (1,)
-    assert state.pending is False
+    assert state.facts.pending is False
     assert state.pending_deliveries == []  # 消费即清空
 
 
@@ -59,7 +70,7 @@ def test_fanout_deliveries_independent():
     d_a = _delivery(node="a", port="in.value")
     d_b = _delivery(node="b", port="in.value")
     event.deliveries.extend([d_a, d_b])
-    state_a, state_b = DataPortState(), DataPortState()
+    state_a, state_b = _state(), _state()
     state_a.receive(event, d_a)
     state_b.receive(event, d_b)
 
@@ -76,7 +87,7 @@ def test_fanout_deliveries_independent():
 def test_consume_returns_ids_in_receive_order():
     """consume 返回消费事件 id 序列(receive 序)——fire.consumed 的契约来源。"""
     events = [Event(i, 1, Kind.DATA, i, "host", None) for i in (1, 2, 3)]
-    state = DataPortState(cache="append")
+    state = _state(cache_strategy=APPEND)
     for event in events:
         delivery = _delivery(event.id)
         event.deliveries.append(delivery)
@@ -87,7 +98,7 @@ def test_consume_returns_ids_in_receive_order():
     ids = NodeSemantics.consume(inst, state, "sink", "in.value")
 
     assert ids == (1, 2, 3)
-    assert state.value == []  # APPEND 消费即排空
+    assert state.facts.value == []  # APPEND 消费即排空
     assert all(d.consumed_seq == seq for e in events for d in e.deliveries)
     assert all(e.consumed_by == [(seq, "sink", "in.value")] for e in events)
 
@@ -97,18 +108,18 @@ def test_signal_and_trigger_states_link_deliveries():
     signal_ev = Event(1, 1, Kind.SIGNAL, True, "src", "g")
     trigger_ev = Event(2, 1, Kind.DATA, 7, "host", None)
 
-    sig = SignalPortState()
+    sig = _state("signal")
     sig_d = _delivery(1, "sink", "g", SLOT_SIGNAL)
     signal_ev.deliveries.append(sig_d)
     sig.receive(signal_ev, sig_d)
     assert sig.pending_deliveries[0].slot == SLOT_SIGNAL
 
-    trig = TriggerPortState()
+    trig = _state("trigger")
     trig_d = _delivery(2, "sink", "go", SLOT_TRIGGER)
     trigger_ev.deliveries.append(trig_d)
     trig.receive(trigger_ev, trig_d)
     assert trig.pending_deliveries[0].slot == SLOT_TRIGGER
-    assert trig.payload == 7 and trig.has_payload is True
+    assert trig.facts.value == 7 and trig.has_payload is True
 
     inst = _MiniInst([signal_ev, trigger_ev])
     NodeSemantics.consume(inst, sig, "sink", "g")

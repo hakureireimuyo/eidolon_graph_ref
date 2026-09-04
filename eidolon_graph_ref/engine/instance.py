@@ -15,7 +15,7 @@ from ..model.assets import AssetRef
 from ..model.graph import SLOT_DATA, SLOT_SIGNAL, GraphDefinition
 from ..model.ports import APPEND
 from .executor import Executor
-from .port_state import DataPortState, SignalPortState, TriggerPortState
+from .port_state import PortState, RuntimeFacts, shared_invariants
 from .protocol import InitContext
 from .timeline import Timeline
 
@@ -118,14 +118,21 @@ class GraphInstance:
             }
             self.node_states[nid] = deepcopy(self._init_states.get(nid, nt.state_defaults))
             self.data_states[nid] = {}
-            self.signal_states[nid] = {s.name: SignalPortState() for s in nt.signal_in}
-            self.trigger_states[nid] = {t.name: TriggerPortState() for t in nt.trigger_in}
+            self.signal_states[nid] = {
+                s.name: PortState(shared_invariants("signal", False)) for s in nt.signal_in
+            }
+            self.trigger_states[nid] = {
+                t.name: PortState(shared_invariants("trigger", False)) for t in nt.trigger_in
+            }
             for p in nt.data_in:
                 wired = (nid, p.name, SLOT_DATA) in self.in_index
                 value = self.configs[nid]["ports"].get(p.name, p.default)
                 value = [] if p.cache == APPEND and value is None else value
-                self.data_states[nid][p.name] = DataPortState(
-                    cache=p.cache, value=value, has_value=not wired, event_driven=wired
+                self.data_states[nid][p.name] = PortState(
+                    shared_invariants("data", wired, p.cache),
+                    facts=RuntimeFacts(value=value),
+                    has_value=not wired,
+                    event_driven=wired,
                 )
 
     def run(self, injections=None):
@@ -138,9 +145,9 @@ class GraphInstance:
                 "state": deepcopy(self.node_states[nid]),
                 "config": deepcopy(self.configs[nid]),
                 "assets": {slot: {"ref": aid, "resolved": True} for slot, aid in self.asset_refs.get(nid, {}).items()},
-                "data_in": {n: {"value": s.value, "has_value": s.has_value, "pending": s.pending} for n, s in self.data_states[nid].items()},
-                "trigger_in": {n: {"pending": s.pending, "payload": s.payload if s.has_payload else None} for n, s in self.trigger_states[nid].items()},
-                "signal_in": {n: {"level": s.level, "pending": s.pending} for n, s in self.signal_states[nid].items()},
+                "data_in": {n: {"value": s.facts.value, "has_value": s.has_value, "pending": s.facts.pending} for n, s in self.data_states[nid].items()},
+                "trigger_in": {n: {"pending": s.facts.pending, "payload": s.facts.value if s.has_payload else None} for n, s in self.trigger_states[nid].items()},
+                "signal_in": {n: {"level": s.facts.level, "pending": s.facts.pending} for n, s in self.signal_states[nid].items()},
             }
             for nid in self.definition.node_order()
         }

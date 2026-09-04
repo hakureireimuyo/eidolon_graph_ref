@@ -64,10 +64,10 @@ class NodeSemantics:
             delivery.consumed_seq = seq
             inst.timeline.events[delivery.event_id].consumed_by.append((seq, node_id, port))
         ids = tuple(d.event_id for d in state.pending_deliveries)
-        state.pending = False
+        state.facts.pending = False
         state.pending_deliveries = []
-        if getattr(state, "cache", None) == APPEND:
-            state.value = []
+        if state.cache_strategy == APPEND:
+            state.facts.value = []
         return ids
 
     @classmethod
@@ -81,7 +81,7 @@ class NodeSemantics:
         # KIND_CONSUME 的 seq 分配确定性);1:1 绑定不变式下无重复,dict.fromkeys 防御保序去重。
         for port in dict.fromkeys(p.signal for p in nt.data_in if p.signal):
             state = inst.signal_states[node_id][port]
-            if state.pending:
+            if state.facts.pending:
                 ids = cls.consume(inst, state, node_id, port)
                 inst.timeline.record(
                     Entry(run=inst.run_no, kind=KIND_CONSUME, dst_node=node_id, dst_port=port, consumed=ids, message="control signal settled")
@@ -96,7 +96,7 @@ class NodeSemantics:
         for t in group.triggers:
             state = inst.trigger_states[node_id][t]
             if state.has_payload:
-                data[t] = state.payload
+                data[t] = state.facts.value
         return data
 
     @classmethod
@@ -110,14 +110,14 @@ class NodeSemantics:
         consumed = []
         for p in group.inputs:
             state = cls._input_state(inst, node_id, p)
-            if state.pending:
+            if state.facts.pending:
                 consumed.extend(cls.consume(inst, state, node_id, p))
         for t in group.triggers:
             state = inst.trigger_states[node_id][t]
-            if state.pending:
+            if state.facts.pending:
                 consumed.extend(cls.consume(inst, state, node_id, t))
                 state.has_payload = False
-                state.payload = None
+                state.facts.value = None
         return tuple(consumed)
 
     @staticmethod
@@ -138,7 +138,7 @@ class NodeSemantics:
             return True
         if (node_id, declaration.signal, SLOT_SIGNAL) not in inst.in_index:
             return True
-        return inst.signal_states[node_id][declaration.signal].level is True
+        return inst.signal_states[node_id][declaration.signal].facts.level is True
 
     @classmethod
     def dynamic(cls, inst, node_id: str, data_port: str) -> bool:
@@ -151,20 +151,20 @@ class NodeSemantics:
         """Evaluate the DATA leaf without allowing Signal to become readiness."""
 
         if port in inst.signal_states[node_id]:  # unbound SignalIn used as data input
-            return inst.signal_states[node_id][port].pending
+            return inst.signal_states[node_id][port].facts.pending
         state = inst.data_states[node_id][port]
-        return True if not cls.dynamic(inst, node_id, port) else state.pending
+        return True if not cls.dynamic(inst, node_id, port) else state.facts.pending
 
     @classmethod
     def effective(cls, inst, node_id: str, port: str):
         """Resolve the handler argument after the static/dynamic source decision."""
 
         if port in inst.signal_states[node_id]:
-            return inst.signal_states[node_id][port].level
+            return inst.signal_states[node_id][port].facts.level
         state = inst.data_states[node_id][port]
         declaration = inst.types[inst.definition.nodes[node_id].type].port(port)
         if cls.dynamic(inst, node_id, port) and state.has_value:
-            return state.value
+            return state.facts.value
         return inst.configs[node_id]["ports"].get(port, declaration.default)
 
     @classmethod
@@ -172,15 +172,15 @@ class NodeSemantics:
         if group.readiness is not None:
             return group.readiness.evaluate(
                 lambda port: cls.data_ready(inst, node_id, port),
-                lambda port: inst.trigger_states[node_id][port].pending,
+                lambda port: inst.trigger_states[node_id][port].facts.pending,
             )
         data_ready = all(cls.data_ready(inst, node_id, port) for port in group.inputs)
-        trigger_ready = any(inst.trigger_states[node_id][port].pending for port in group.triggers) if group.triggers else True
+        trigger_ready = any(inst.trigger_states[node_id][port].facts.pending for port in group.triggers) if group.triggers else True
         if not trigger_ready:
             return False
         if not group.triggers:
             # 裁定 16:无触发器组要求新事实——至少一个输入 pending 才触发。
             # 全静态回退值不构成触发,防止"永远 ready"契约借壳复活(裁定 9)。
-            if not any(cls._input_state(inst, node_id, p).pending for p in group.inputs):
+            if not any(cls._input_state(inst, node_id, p).facts.pending for p in group.inputs):
                 return False
         return data_ready
