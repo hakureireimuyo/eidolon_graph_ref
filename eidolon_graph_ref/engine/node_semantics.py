@@ -22,48 +22,53 @@ class NodeSemantics:
         raise TypeError("NodeSemantics is final; protocol behavior is not an extension point")
 
     @staticmethod
-    def receive(inst, event: Event, node_id: str, port: str, slot: str) -> None:
+    def receive(inst, event: Event, node_id: str, port: str, slot: str, delivery) -> None:
         """Interpret one delivered event and update only the target port fact.
 
         Data and Signal remain orthogonal: a data event changes a data cache;
         a signal event changes a level; either kind can activate a trigger.
         Group membership is deliberately absent from this layer.
+        ``delivery`` is the pending record for this exact (node, port, slot)
+        receive — the port state links it directly, so consumption needs no
+        reverse lookup.
         """
 
         if slot == SLOT_DATA:
             if event.kind is not Kind.DATA:
                 raise ValueError("only data events may enter a data slot")
-            inst.data_states[node_id][port].receive(event)
+            inst.data_states[node_id][port].receive(event, delivery)
             return
         if slot == SLOT_SIGNAL:
             if event.kind is not Kind.SIGNAL:
                 raise ValueError("only signal events may enter a signal slot")
-            inst.signal_states[node_id][port].receive(event)
+            inst.signal_states[node_id][port].receive(event, delivery)
             return
         if slot == SLOT_TRIGGER:
-            inst.trigger_states[node_id][port].receive(event)
+            inst.trigger_states[node_id][port].receive(event, delivery)
             return
         raise ValueError(f"unknown slot {slot!r}")
 
     @classmethod
-    def consume(cls, inst, state, node_id: str, port: str) -> None:
-        """Mark a port state's pending events as consumed by this node and port.
+    def consume(cls, inst, state, node_id: str, port: str) -> tuple[int, ...]:
+        """Mark a port state's pending deliveries as consumed.  O(k), k = 待消费投递数。
+
+        端口直接持有本端口的 Delivery 引用，无需比对 node/port、无需扫描
+        事件的其他投递（REFACTOR_EVENT_INDEXING）。返回消费的事件 id 序列。
 
         APPEND 缓存随消费排空:累积语义 = 「自上次消费以来的增量批次」,
         handler 每次收到的即本次新增;跨消费累积由节点 state 负责。
         """
 
         seq = inst.timeline.next_seq
-        for eid in state.pending_events:
-            event = inst.timeline.events[eid]
-            for delivery in event.deliveries:
-                if delivery.node == node_id and delivery.port == port and delivery.consumed_seq is None:
-                    delivery.consumed_seq = seq
-            event.consumed_by.append((seq, node_id, port))
+        for delivery in state.pending_deliveries:
+            delivery.consumed_seq = seq
+            inst.timeline.events[delivery.event_id].consumed_by.append((seq, node_id, port))
+        ids = tuple(d.event_id for d in state.pending_deliveries)
         state.pending = False
-        state.pending_events = []
+        state.pending_deliveries = []
         if getattr(state, "cache", None) == APPEND:
             state.value = []
+        return ids
 
     @classmethod
     def settle_control_signals(cls, inst, node_id: str) -> None:
@@ -77,8 +82,7 @@ class NodeSemantics:
         for port in dict.fromkeys(p.signal for p in nt.data_in if p.signal):
             state = inst.signal_states[node_id][port]
             if state.pending:
-                ids = tuple(state.pending_events)
-                cls.consume(inst, state, node_id, port)
+                ids = cls.consume(inst, state, node_id, port)
                 inst.timeline.record(
                     Entry(run=inst.run_no, kind=KIND_CONSUME, dst_node=node_id, dst_port=port, consumed=ids, message="control signal settled")
                 )
@@ -107,13 +111,11 @@ class NodeSemantics:
         for p in group.inputs:
             state = cls._input_state(inst, node_id, p)
             if state.pending:
-                consumed.extend(state.pending_events)
-                cls.consume(inst, state, node_id, p)
+                consumed.extend(cls.consume(inst, state, node_id, p))
         for t in group.triggers:
             state = inst.trigger_states[node_id][t]
             if state.pending:
-                consumed.extend(state.pending_events)
-                cls.consume(inst, state, node_id, t)
+                consumed.extend(cls.consume(inst, state, node_id, t))
                 state.has_payload = False
                 state.payload = None
         return tuple(consumed)

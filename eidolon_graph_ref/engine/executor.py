@@ -153,7 +153,7 @@ class Executor:
                 dst_slot=slot,
             )
         )
-        NodeSemantics.receive(inst, e, nid, port, slot)
+        NodeSemantics.receive(inst, e, nid, port, slot, d)
         if depth_first:
             queue.appendleft(nid)
         else:

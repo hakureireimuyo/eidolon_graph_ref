@@ -124,7 +124,9 @@ class GraphInstance:
                 wired = (nid, p.name, SLOT_DATA) in self.in_index
                 value = self.configs[nid]["ports"].get(p.name, p.default)
                 value = [] if p.cache == APPEND and value is None else value
-                self.data_states[nid][p.name] = DataPortState(p.cache, value, not wired, False, [], wired)
+                self.data_states[nid][p.name] = DataPortState(
+                    cache=p.cache, value=value, has_value=not wired, event_driven=wired
+                )
 
     def run(self, injections=None):
         Executor(self.types).run(self, injections or [])
