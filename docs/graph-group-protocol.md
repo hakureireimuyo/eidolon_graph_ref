@@ -91,6 +91,7 @@ Injection → Event → Wire → Port → [端口模式判定] → Group Readine
 | 14 | Signal 归位 | Signal 退出 Readiness;= DataIn 的数据来源选择/激活模式控制(见 §6);SIGNAL/SIGNAL_HIGH 叶条件撤销 |
 | 15 | Signal 绑定细则 | 未激活信号 = 默认数据有效;SignalIn↔DataIn 严格一对一;未绑定 SignalIn 可单独存在;LOW = 不等待 + 回默认数据 |
 | 16 | 无触发器组要求新事实 | 缺省 readiness 下,无触发器组须至少一个输入 pending 才触发;全静态回退值不再在任意节点唤醒时连带触发(裁定 9 精神的延伸;DSL v2 迁移实测暴露,2026-08-22) |
+| 17 | 空组一律构建错误(2026-09-05) | 无 inputs 且无 triggers 的组**即使携带显式 readiness** 也构成构建错误(语义闭包审计 R6 裁定)——零端口组的谓词只能是常量:恒真 = 每次节点唤醒触发且不消费任何事实,恰是裁定 9/16 禁止的"永远 ready"自动执行契约借壳。内核裁定 → NodeType 不变式 → DSL 自动继承(无 DSL 层专属规则) |
 
 ## 4. 声明层
 
@@ -160,7 +161,7 @@ class DataIn:
 3. 显式 `readiness` 引用端口 ⊆ `inputs ∪ triggers`
 4. **每个输入端口恰属于一个 Group**(重复归属/未归属 = 构建错误;
    未归属端口的严格读法见 §14-2)
-5. 默认空 Group(inputs/triggers 皆空且无显式 readiness)= 构建错误
+5. 空 Group(inputs/triggers 皆空)= 构建错误,显式 readiness 不豁免(裁定 17)
 6. `DataIn.signal` 引用已声明 SignalIn;严格一对一(每个 SignalIn 至多被
    一个 DataIn 绑定);未绑定 SignalIn 合法(纯信号节点形态)
 7. config 三节白名单(§7)

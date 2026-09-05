@@ -1,6 +1,7 @@
 # 节点定义语言 v2(函数签名即组协议)
 
-> 状态:已裁定(2026-08-22,原型验证 14/14 通过)
+> 状态:已裁定(2026-08-22,原型验证 14/14 通过);**核心语义冻结(2026-09-05,**
+> 语义闭包审计 [semantic-closure-matrix.md](./semantic-closure-matrix.md))
 >
 > 文档角色:**本文件冻结 DSL 的语义,不冻结实现**。原型实现为
 > [eidolon_dsl.py](../eidolon_dsl.py),验证为
@@ -198,6 +199,7 @@ class Boot(NodeDefinition):
 | 10 | 继承闸门沿用 | 具体节点定义间禁止行为继承;共享行为走普通材料类(与 graph-node-protocol.md §2.0 一致) |
 | 11 | Config 显式通道 | 函数体读取组配置的唯一通道是 `cfg: Config` 参数(值 = defaults ∪ 图配置);`this` 保持仅 State 视图 |
 | 12 | 多输出返回协议(2026-08-23) | 声明输出端口数决定返回形态:恰 1 个 → 裸值;≥ 2 个 → dict(键=outputs=/signals= 声明成员名,编译器映射组限定端口;缺失键=该端口本轮无事件,None=合法载荷照发);`signals=` 声明信号输出端口(必须配 `outputs=`,纯信号走 `-> Signal[bool]`);未知键/0 输出返回载荷 → KIND_ERROR |
+| 13 | 空组一律构建错误(2026-09-05,内核裁定 17) | 无 inputs/triggers 的组即使带显式 `readiness=ALL()` 也拒绝——内核裁定 → NodeType 不变式 → DSL 自动继承,不设 DSL 层专属规则 |
 
 ## 4. 已知语义事实(原型实测)
 

@@ -61,7 +61,7 @@
 - **outputs**:组的输出授权集合——handler 只能写本组 outputs。
 - **defaults**:组行为参数的默认值(定义层)。
 - **组间数据**:经节点状态传递;执行只读本组输入。
-- **空组**:无 inputs / triggers 且无显式 readiness = 构建错误。
+- **空组**:无 inputs / triggers = 构建错误,显式 readiness 不豁免(裁定 17)。
 
 ## 六、Readiness
 

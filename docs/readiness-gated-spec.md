@@ -67,8 +67,11 @@ gate LOW / 未连接(静态):DATA 叶真空为真(不等待),handler 收
 | 自定义谓词(满足 Readiness 协议但非内置) | ✗ | `unsupported readiness predicate` |
 | 缺省(不写 readiness=) | ✓ `Group.readiness = None`,内核推导 ALL(data) ∧ ANY(triggers);DSL **不物化** | — |
 
-## 5. 待内核裁定事项(冻结当前行为)
+## 5. 裁定状态
 
-1. `@group(readiness=ALL())` 的"永真组"(无输入/无触发器,仅 cfg 参数)
-   当前可编译——与裁定 9/16 精神存在张力(矩阵 R6)。
-2. Signal 内型是否收紧为编译期强制 bool(矩阵 R5)。
+1. ~~`readiness=ALL()` 永真组~~ → **已裁定(裁定 17,2026-09-05)**:空组
+   一律构建错误,显式 readiness 不豁免(矩阵 R6 关闭)。断言:
+   `test_empty_group_with_constant_readiness_rejected` +
+   `test_empty_group_rejected_at_ir_level`(IR 级同样成立)。
+2. Signal 内型是否收紧为编译期强制 bool(矩阵 R5)——**暂缓**,宽松行为
+   已冻结;收紧需内核裁定。

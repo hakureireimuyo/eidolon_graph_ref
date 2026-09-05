@@ -250,8 +250,8 @@ class Group:
   Port(端口级事实)因此天然组局部;事件系统不感知 Group。
 - **handler 必填**;同一函数可绑定多个组(共享允许),但 Group 身份来自
   Group 本身而非 callable 身份——handler 禁止依赖 `ctx.group` 分发。
-- **默认空 Group 报错**:inputs/triggers 皆空且无显式 readiness = 构建错误
-  (防止"永远 ready"的自动执行契约)。
+- **空 Group 报错(裁定 17)**:inputs/triggers 皆空 = 构建错误,显式
+  readiness 不豁免(防止"永远 ready"的自动执行契约借壳)。
 - 组间数据经节点状态传递;执行时只读本组输入。
 
 ### 2.3 端口声明

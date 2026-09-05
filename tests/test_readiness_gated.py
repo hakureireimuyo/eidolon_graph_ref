@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from eidolon_dsl import DefinitionError, compile_dsl
 from eidolon_graph_ref.model.node_type import NodeType
+from eidolon_graph_ref.model.readiness import ALL
 
 _HEADER = textwrap.dedent(
     """
@@ -245,21 +246,30 @@ def test_signal_inner_type_not_validated():
     assert [p.name for p in nt.signal_in] == ["g.level"]
 
 
-# ---- 语义缺口候选(矩阵 R6,冻结当前行为,待内核裁定)----
+# ---- 裁定 17(2026-09-05):空组一律构建错误,显式 readiness 不豁免 ----
 
 
-def test_readiness_only_group_with_all_compiles():
-    """@group(readiness=ALL()) 可构造"永真组"(无输入/无触发器/永真谓词,
-    仅 cfg 参数)。当前 DSL 接受;与裁定 9/16 的"永远 ready 契约禁止借壳"
-    精神存在张力,待内核裁定后收紧或明确合法化——冻结当前行为。"""
-    nt = _compile(
-        """
-        class N(NodeDefinition):
-            @group(readiness=ALL())
-            def g(cfg: Config) -> int:
-                return 1
-        """
-    )
-    assert nt.group("g").readiness is not None
-    assert nt.group("g").readiness.referenced_ports() == set()
-    assert nt.group("g").inputs == () and nt.group("g").triggers == ()
+def test_empty_group_with_constant_readiness_rejected():
+    """内核裁定(矩阵 R6 关闭):无输入、无触发器的组即使携带显式
+    readiness(恒真谓词)也构成构建错误——裁定 9/16 精神的延伸,
+    DSL 经 NodeType 不变式自动继承,无需 DSL 层专属规则。"""
+    with pytest.raises(DefinitionError, match="empty group"):
+        _compile(
+            """
+            class N(NodeDefinition):
+                @group(readiness=ALL())
+                def g(cfg: Config) -> int:
+                    return 1
+            """
+        )
+
+
+def test_empty_group_rejected_at_ir_level():
+    """同一规则对手工构造 NodeType 同样成立(构造即校验)。"""
+    from eidolon_graph_ref.model.node_type import Group, NodeType
+
+    with pytest.raises(ValueError, match="empty group"):
+        NodeType(
+            name="N",
+            groups=(Group("g", readiness=ALL(), handler=lambda ctx: None),),
+        )

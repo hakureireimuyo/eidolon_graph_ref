@@ -101,8 +101,11 @@ class NodeType:
         for g in self.groups:
             if g.handler is None:
                 _err(f"group {g.name!r}: handler is required")
-            if not g.inputs and not g.triggers and g.readiness is None:
-                _err(f"group {g.name!r}: empty default group")
+            if not g.inputs and not g.triggers:
+                # 裁定 17(2026-09-05):空组一律构建错误——显式 readiness 不豁免。
+                # 零端口组的谓词只能是常量:恒真 = 每次节点唤醒触发且不消费任何
+                # 事实,恰是裁定 9/16 禁止的"永远 ready"自动执行契约借壳。
+                _err(f"group {g.name!r}: empty group (no inputs, no triggers)")
             for p in g.inputs:
                 if p not in allowed_inputs:
                     _err(f"group {g.name!r}: invalid input {p!r}")

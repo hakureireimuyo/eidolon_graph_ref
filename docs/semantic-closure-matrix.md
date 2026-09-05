@@ -1,6 +1,6 @@
 # Kernel 语义闭包矩阵(Semantic Closure Matrix)
 
-> 状态:审计完成(2026-09-05),可检验断言见
+> 状态:审计完成 + **DSL core 冻结**(2026-09-05,§4 冻结确认),可检验断言见
 > [tests/test_primitives_as_contract.py](../tests/test_primitives_as_contract.py) 与
 > [tests/test_readiness_gated.py](../tests/test_readiness_gated.py)
 >
@@ -46,63 +46,55 @@ NodeType 是语义 IR(graph-node-protocol.md §1.0):DSL 的职责不是尽可能
 | `tags` | `@staticmethod def tags()` | ✓ | 只读声明函数(裁定 2026-08-23) |
 | `doc` | `@staticmethod def doc()` | ✓ | 同上 |
 
-## 3. 反向检查(真正的缺陷/限制清单)
+## 3. 反向检查(缺口 / 有意限制 / 冻结,三类分账)
 
-### G1(已修复)exec 前端 State 字段静默丢失 — **真实缺口**
+分类原则:**"IR 能做而 DSL 不能写"不自动等于缺口**。DSL 公开词汇是
+Kernel 能力的一个**有意子集**——凡是"有意子集"的边界,必须在此有明确
+理由;只有"语义静默丢失 / 必需语义无法表达"才算真实缺口。
+
+### 真实缺口(已修复,零残留)
+
+**G1(已修复)exec 前端 State 字段静默丢失** — 审计最重要的发现。
 
 `compile_dsl` 的 exec 命名空间下,`__module__` 为 `builtins`,类级注解
 字符串求值失败被静默跳过 → 带状态的外部节点经统一入口编译后
-`state_defaults` 为空、**不报任何错误**。
+`state_defaults` 为空、**不报任何错误**——编译成功、NodeType 合法,但
+语义已经丢失(合法但错误的 IR)。仅断言"编译成功"的测试永远暴露不了
+这种缺陷;只有逐字段比较最终 NodeType 语义才能发现(即本矩阵的方法
+价值)。
 
 修复(2026-09-05,eidolon_dsl.py `_DSLMeta.__new__`):注解求值作用域改为
 `@group` 函数的 `__globals__`(真实定义域),模块查表仅作无组类的回退。
 合约测试锁定:10 个 primitives 经 exec 前端编译,state 契约逐字段一致。
 
-### R1(冻结限制)DataIn.signal 仅同组绑定
+### 有意限制(intentional limitation,IR ⊃ DSL 词汇)
 
-IR 允许 `DataIn.signal` 引用**节点级**任意 SignalIn(NodeType 校验为
-节点级);运行期 `settle_control_signals` / `signal_active` 也按节点级解析。
-DSL 冻结为仅同组(编译期 DefinitionError)。当前没有任何 primitive 或
-测试需要跨组绑定;若未来出现真实需求,改动点 = `generate_ports` 的绑定
-校验 + 限定名解析,矩阵本行随之更新。审计断言:
-tests/test_readiness_gated.py::test_gated_cross_group_binding_rejected。
+| # | 限制 | 明确理由 |
+|---|---|---|
+| R1 | `DataIn.signal` 仅同组绑定(IR 为节点级) | 无 primitive / 测试需要跨组绑定;放开前提 = 内核出现真实跨组源选择需求,改动点 = `generate_ports` 绑定校验 + 限定名解析 |
+| R2 | readiness 仅限内置谓词 DATA/TRIGGER/ALL/ANY(IR 为开放 Protocol) | DSL 公开的是 Readiness Protocol 的**标准声明子集**;不为"看起来更强大"先造 readiness algebra;放开前提 = 内核出现必须由自定义谓词表达的语义 |
+| R3 | handler 共享不可表达(裁定 10 允许) | "一个函数 = 一个组"是 DSL 结构的有意收紧;共享仍经手工构造 NodeType 路径可用 |
 
-### R2(冻结限制)readiness 仅限内置谓词
+### 冻结确认(已升格为契约)
 
-IR 的 `Readiness` 是开放 Protocol,但 DSL 组限定器只认识
-DATA/TRIGGER/ALL/ANY,自定义谓词 → DefinitionError("unsupported
-readiness predicate")。**不要**为"看起来更强大"先造 readiness algebra;
-放开此限制的前提是内核出现必须由自定义谓词表达的语义。
+| # | 项 | 状态 |
+|---|---|---|
+| R4 | init / init_defaults / type_name 可表达性 | ✓ 合约测试锁定 + DSL 文档 §2.7 |
+| R5 | Signal 内型不校验(电平恒 bool) | ✓ 宽松行为冻结;收紧需内核裁定 |
+| R6 | `readiness=ALL()` 永真组 | ✓ **已关闭——内核裁定 17(2026-09-05)**:空组一律构建错误,显式 readiness 不豁免 |
 
-### R3(结构性限制)handler 共享不可表达
+## 4. 冻结确认(2026-09-05)
 
-裁定 10 允许跨组共享 handler,DSL 的"一个函数 = 一个组"结构使共享
-无法表达(同一函数复用会产生重复组名)。属 DSL 结构的有意收紧,不是
-语义缺口;手工构造 NodeType 路径仍可共享。
+| 检查项 | 结果 |
+|---|---|
+| ambiguous(DSL 可写但语义未定义) | **0** |
+| missing(Kernel 必需语义 DSL 无法表达) | **0**(G1 为实现缺陷,非表达缺陷,已修复) |
+| intentional limitation | R1/R2/R3,各有明确理由(§3) |
+| 真实缺口 | G1,已修复并锁入合约测试 |
+| 测试 | **180 全绿**(含 10/10 primitive 合约 + 34 项审计断言) |
+| 结论 | **DSL core = Frozen** |
 
-### R4(已冻结)init / init_defaults / type_name 未文档化能力
-
-三者均可经 DSL 表达并正确进入 IR,但此前无文档无测试(DSL 文档标注
-"待办:init 钩子的 DSL 形态")。合约测试已把它们升格为冻结契约;
-语义补充到 [graph-node-definition-dsl.md](./graph-node-definition-dsl.md) §2.7。
-
-### R5(冻结的宽松)Signal 内型不做编译期校验
-
-`SignalMarker` 内型应为 `bool`(运行期电平恒为 bool),但编译器不校验
-内型——`Annotated[int, SignalMarker()]` 照常编译。冻结当前宽松行为;
-收紧需内核裁定(可能破坏依赖宽松注解的外部节点)。
-
-### R6(待内核裁定)`readiness=ALL()` 可复活"永真组"
-
-`@group(readiness=ALL())` + 仅 `cfg: Config` 参数可构造无输入、无触发器、
-永真谓词的组——与裁定 9/16("永远 ready"契约禁止借壳)精神存在张力。
-当前 DSL 接受;测试冻结现状,待内核裁定收紧(编译期拒绝空谓词组)或
-明确合法化(如作为宿主轮询钩子)。
-
-## 4. 结论
-
-- **闭包状态**:10 个 primitives 的完整语义契约经 exec 前端逐字段一致
-  (合约测试 10/10);除 G1 外**没有发现 DSL 无法表达的内核必需语义**。
-- G1 修复后,正向矩阵全部 ✓ 或 ◐(受限均有明确裁定或冻结理由)。
-- **DSL 核心语义具备冻结条件**:不建议新增语法(R1/R2/R3/R6 的放开
-  都以内核语义演化为前提,而非以 DSL 能力愿望为前提)。
+> **DSL 核心语义自 2026-09-05 起冻结。**此后新增 DSL 语法必须同时
+> 证明:(a) 对应的 Kernel semantic capability 已存在;(b) 现有 DSL 无法
+> 表达它;(c) 更新本矩阵并附带合约测试。否则不接受——DSL 是 Kernel 的
+> 稳定定义语言,不是持续增加功能的语言。
