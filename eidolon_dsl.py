@@ -47,7 +47,8 @@ import inspect
 import sys
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, get_type_hints
+from collections.abc import Callable, Mapping
+from typing import Annotated, Any, TypeVar, overload, get_type_hints
 
 from eidolon_graph_ref.engine.protocol import GroupOutput
 from eidolon_graph_ref.model.assets import AssetIn
@@ -84,7 +85,15 @@ class Trigger:
 class Config:
     """Merged group config (parameter annotation): the parameter receives
     ``{**group.defaults, **graph group config}``.  ``this`` remains state-only;
-    config enters the body only through this declared parameter."""
+    config enters the body only through this declared parameter.
+
+    At runtime the handler receives a plain ``dict``; this class exists only as
+    a DSL marker.  ``__getitem__`` is declared so Pylance accepts ``cfg["key"]``.
+    """
+
+    def __class_getitem__(cls, key: Any) -> Any: ...
+
+    def __getitem__(self, key: str) -> Any: ...
 
 
 
@@ -120,11 +129,58 @@ class Asset:
         return _Marker(("asset", t))
 
 
+# ---- Annotated metadata markers (Python Surface Language) --------------------
+# These marker classes live in Annotated[...] metadata so that Python type
+# checkers see the *value type* (int, bool, list, ...) while the Eidolon DSL
+# compiler extracts the graph-semantic role from the metadata.
+
+
+@dataclass(frozen=True)
+class StateMarker:
+    """Annotated[T, StateMarker()] → state field with value type T."""
+
+
+@dataclass(frozen=True)
+class TriggerMarker:
+    """Annotated[T, TriggerMarker()] → trigger input, handler receives T."""
+
+
+@dataclass(frozen=True)
+class SignalMarker:
+    """Annotated[T, SignalMarker()] → signal input, handler receives T."""
+
+
+@dataclass(frozen=True)
+class GatedMarker:
+    """Annotated[T, GatedMarker("gate")] → data input gated by signal."""
+    signal: str
+
+
+@dataclass(frozen=True)
+class AppendMarker:
+    """Annotated[list[T], AppendMarker()] → cumulative input (cache=APPEND)."""
+
+
+@dataclass(frozen=True)
+class AssetMarker:
+    """Annotated[T, AssetMarker()] → asset dependency (build-time resolved)."""
+    asset_type: type | None = None
+
+
+
 def _is_state(ann: Any) -> bool:
-    return ann is State or (isinstance(ann, _Marker) and ann.args[0] == "state")
+    """Detect state field from both old (State[int]) and new (Annotated[int, StateMarker()]) forms."""
+    meta = getattr(ann, "__metadata__", None)
+    return (
+        ann is State
+        or (isinstance(ann, _Marker) and ann.args[0] == "state")
+        or (meta is not None and any(isinstance(m, StateMarker) for m in meta))
+    )
 
 
 # ---- @group decorator --------------------------------------------------------
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 @dataclass(frozen=True)
@@ -136,11 +192,28 @@ class _GroupOpts:
     trigger: str | None = None
 
 
+@overload
+def group(fn: _F) -> _F: ...
+@overload
+def group(
+    fn: None = ...,
+    *,
+    readiness: Any = ...,
+    defaults: dict[str, Any] | None = ...,
+    outputs: tuple[str, ...] = ...,
+    signals: tuple[str, ...] = ...,
+    trigger: str | None = ...,
+) -> Callable[[_F], _F]: ...
+
+
 def group(fn=None, *, readiness=None, defaults=None, outputs=(), signals=(), trigger=None):
     """Declare the decorated function as an Eidolon Group.
 
     Decoration only tags the function for the ``NodeDefinition`` metaclass;
     the function is never invoked as a Python method at runtime.
+
+    Type contract: identity decorator — ``Callable[P, R] → Callable[P, R]``.
+    Pylance sees the original function signature unchanged.
     """
 
     opts = _GroupOpts(
@@ -257,8 +330,9 @@ class PortDeclarations:
 
 
 def _annotations(fn) -> dict:
+    """Get type hints preserving Annotated metadata."""
     try:
-        return dict(get_type_hints(fn))
+        return dict(get_type_hints(fn, include_extras=True))
     except Exception:
         return dict(getattr(fn, "__annotations__", {}))
 
@@ -290,6 +364,54 @@ def extract_parameters(fn, where: str) -> tuple[tuple[ParameterDeclaration, ...]
     return params, ReturnDeclaration(hints.get("return", inspect.Signature.empty))
 
 
+def _get_role(ann: Any) -> str | None:
+    """Extract Eidolon role from Annotated metadata or bare class marker."""
+    if ann is None:
+        return None
+    # New Annotated form: check metadata markers
+    meta = getattr(ann, "__metadata__", None)
+    if meta is not None:
+        for m in meta:
+            if isinstance(m, StateMarker):
+                return "state"
+            if isinstance(m, TriggerMarker):
+                return "trigger"
+            if isinstance(m, SignalMarker):
+                return "signal"
+            if isinstance(m, GatedMarker):
+                return "gated"
+            if isinstance(m, AppendMarker):
+                return "append"
+            if isinstance(m, AssetMarker):
+                return "asset"
+    # Old bare-class form (backward compat)
+    if ann is Trigger:
+        return "trigger"
+    if ann is Config:
+        return "config"
+    if ann is Signal:
+        return "signal"
+    if isinstance(ann, _Marker):
+        kind = ann.args[0]
+        return kind if kind in ("state", "gated", "append", "asset") else None
+    return None
+
+
+def _extract_type(ann: Any) -> Any:
+    """Extract the inner value type T from Annotated[T, ...] or _Marker forms."""
+    if ann is None:
+        return Any
+    # Annotated[T, ...] → T
+    meta = getattr(ann, "__metadata__", None)
+    if meta is not None:
+        args = getattr(ann, "__args__", None)
+        return args[0] if args else Any
+    # Old _Marker form: ("gated", int, "gate") → int; ("state", int) → int
+    if isinstance(ann, _Marker) and len(ann.args) >= 2:
+        return ann.args[1]
+    return ann
+
+
 # ---- 阶段 2：解释 -------------------------------------------------------------
 
 
@@ -311,27 +433,40 @@ def interpret_parameter(decl: ParameterDeclaration, gname: str, where: str) -> I
 
     port = f"{gname}.{decl.name}"
     ann = decl.type_hint
-    if ann is Trigger:
+    role = _get_role(ann)
+    if isinstance(ann, _Marker) and role is None:
+        # 旧 _Marker 形式仅 state/gated/append/asset 合法
+        raise DefinitionError(f"{where}: unknown annotation {ann!r}")
+    if role == "trigger":
         return InterpretedParameter(decl.name, "trigger", port, decl.default, decl.has_default)
-    if ann is Config:
+    if role == "config":
         return InterpretedParameter(decl.name, "config", "", decl.default, decl.has_default)
-    if ann is Signal:
+    if role == "signal":
         return InterpretedParameter(decl.name, "signal", port, decl.default, decl.has_default)
-    if isinstance(ann, _Marker):
-        kind = ann.args[0]
-        if kind == "gated":
+    if role == "gated":
+        # 绑定:新 Annotated 形式用 GatedMarker.signal,旧 _Marker 形式用 ann.args[2]
+        meta = getattr(ann, "__metadata__", None)
+        if meta is not None:
+            binding = next(m.signal for m in meta if isinstance(m, GatedMarker))
+        else:
             binding = ann.args[2]  # ("gated", type, binding)
-            if not isinstance(binding, str):
-                raise DefinitionError(f"{where}: Gated binding must be a string, got {binding!r}")
-            return InterpretedParameter(
-                decl.name, "gated", port, decl.default, decl.has_default, signal_binding=binding
-            )
-        if kind == "append":
-            return InterpretedParameter(decl.name, "append", port, decl.default, decl.has_default)
-        if kind == "asset":
-            if decl.has_default:
-                raise DefinitionError(f"{where}: asset parameter {decl.name!r} takes no default")
-            return InterpretedParameter(decl.name, "asset", port, asset_type=ann.args[1])
+        if not isinstance(binding, str):
+            raise DefinitionError(f"{where}: Gated binding must be a string, got {binding!r}")
+        return InterpretedParameter(
+            decl.name, "gated", port, decl.default, decl.has_default, signal_binding=binding
+        )
+    if role == "append":
+        return InterpretedParameter(decl.name, "append", port, decl.default, decl.has_default)
+    if role == "asset":
+        if decl.has_default:
+            raise DefinitionError(f"{where}: asset parameter {decl.name!r} takes no default")
+        meta = getattr(ann, "__metadata__", None)
+        if meta is not None:
+            asset_type = next(m.asset_type for m in meta if isinstance(m, AssetMarker))
+        else:
+            asset_type = ann.args[1]  # type: ignore[union-attr]
+        return InterpretedParameter(decl.name, "asset", port, asset_type=asset_type)
+    if role is not None:
         raise DefinitionError(f"{where}: unknown annotation {ann!r}")
     return InterpretedParameter(decl.name, "data", port, decl.default, decl.has_default)
 
@@ -377,9 +512,13 @@ def interpret_return(ret: ReturnDeclaration, opts: _GroupOpts, gname: str, where
     if ann is inspect.Signature.empty or ann is None or ann is type(None):
         out_kind = None
     elif isinstance(ann, _Marker) and ann.args[0] == "signal_out":
-        out_kind = "signal"
+        out_kind = "signal"  # old form: -> Signal[bool]
     else:
-        out_kind = "data"
+        meta = getattr(ann, "__metadata__", None)
+        if meta is not None and any(isinstance(m, SignalMarker) for m in meta):
+            out_kind = "signal"  # new form: -> Annotated[bool, SignalMarker()]
+        else:
+            out_kind = "data"
     if opts.signals and not opts.outputs:
         raise DefinitionError(f"{where}: signals= requires outputs=")
     if opts.outputs:
@@ -490,7 +629,7 @@ def _compile_group(cls_name: str, fn, opts: _GroupOpts):
     return spec, wrapper, ports
 
 
-def _qualify_readiness(pred, gname: str):
+def _qualify_readiness(pred: Any, gname: str) -> Any:
     """Group-qualify leaf ports of a readiness predicate (``DATA("a")`` → ``DATA("add.a")``)."""
 
     if pred is None:
@@ -500,7 +639,8 @@ def _qualify_readiness(pred, gname: str):
             return pred
         return type(pred)(f"{gname}.{pred.port}")
     if isinstance(pred, (_All, _Any)):
-        return type(pred)(tuple(_qualify_readiness(c, gname) for c in pred.conds))
+        qualified = tuple(_qualify_readiness(c, gname) for c in pred.conds)
+        return type(pred)(tuple(c for c in qualified if c is not None))
     raise DefinitionError(f"unsupported readiness predicate {pred!r}")
 
 
