@@ -161,6 +161,27 @@ class Clock(NodeDefinition):
 类属性赋值形式编译期 DefinitionError。未重载的节点 = 无 tag / 无说明书
 (编辑器侧落 custom 分类与「暂无说明」兜底)。
 
+### 2.7 init / init_defaults / type_name(闭包审计冻结 2026-09-05)
+
+```python
+class Boot(NodeDefinition):
+    type_name = "bootnode"          # NodeType.name(缺省 = 类名)
+    init_defaults = {"seed": 7}     # 构建配置默认(实例 config["init"] 可覆写)
+
+    value: State[int] = 0
+
+    @staticmethod
+    def init(ctx):                  # 构建期钩子:InitContext -> dict | None
+        return {"value": ctx.config["seed"]}   # delta ⊆ state_defaults 键
+```
+
+- `init` 调用形态与内核约定一致:单 `ctx` 参数、无默认值;返回增量字典,
+  未知 state 字段 = 构建期错误(内核校验,graph-group-protocol.md §7)。
+- 三者此前"碰巧可用"但未文档化;已由
+  [tests/test_primitives_as_contract.py](../tests/test_primitives_as_contract.py)
+  升格为冻结契约,完整闭包状态见
+  [semantic-closure-matrix.md](./semantic-closure-matrix.md)。
+
 ## 3. 语义裁定表
 
 | # | 裁定 | 内容 |
@@ -215,4 +236,6 @@ class Clock(NodeDefinition):
   错误行为)
 - 内置 10 节点已全部迁移至 DSL(`eidolon_primitives/nodes.py`),测试套件
   翻转完成:63/63 通过
-- 待办:`init` 钩子的 DSL 形态
+- 闭包审计(2026-09-05):primitives 升格为 DSL 合约测试(exec 前端逐字段
+  一致),init/type_name 形态冻结(§2.7);缺口与限制见
+  [semantic-closure-matrix.md](./semantic-closure-matrix.md)

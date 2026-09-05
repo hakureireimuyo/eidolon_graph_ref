@@ -737,8 +737,18 @@ class _DSLMeta(NodeDefinitionMeta):
         for field, ann in dict(namespace.get("__annotations__", {})).items():
             if isinstance(ann, str):
                 if module_globals is None:
-                    mod = sys.modules.get(namespace.get("__module__"))
-                    module_globals = vars(mod) if mod else {}
+                    # 注解字符串的求值作用域 = @group 函数的定义域(fn.__globals__)。
+                    # exec 前端(compile_dsl)下 __module__ 是 builtins,模块查表
+                    # 会失败导致 State 字段静默丢失(闭包审计 2026-09-05);
+                    # 模块查表仅作无组类的回退。
+                    for value in namespace.values():
+                        g = getattr(value, "__globals__", None)
+                        if isinstance(g, dict):
+                            module_globals = g
+                            break
+                    else:
+                        mod = sys.modules.get(namespace.get("__module__"))
+                        module_globals = vars(mod) if mod else {}
                 try:
                     ann = eval(ann, module_globals)
                 except Exception:
