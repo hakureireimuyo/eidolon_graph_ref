@@ -4,53 +4,68 @@ Same package standing as any external node package: this module only produces
 NodeType values via the DSL front-end; the kernel never imports it.
 See docs/graph-node-definition-dsl.md for the language semantics.
 """
-from eidolon_dsl import Append, Config, Gated, NodeDefinition, Signal, State, Trigger, group
+from typing import Annotated
 
+from eidolon_dsl import (
+    AppendMarker,
+    Config,
+    GatedMarker,
+    NodeDefinition,
+    SignalMarker,
+    StateMarker,
+    TriggerMarker,
+    group,
+)
+
+
+# ---- 源节点 ------------------------------------------------------------------
 
 class Source(NodeDefinition):
-    count: State[int] = 0
+    count: Annotated[int, StateMarker()] = 0
 
     @group(defaults={"step": 1})
-    def tick(this, trigger: Trigger, cfg: Config) -> int:
-        count = this.count
-        this.count += cfg["step"]
+    def tick(this, trigger: Annotated[bool, TriggerMarker()], cfg: Config) -> int:
+        count = this.count  # type: ignore[attr-defined]
+        this.count = count + cfg["step"]  # type: ignore[attr-defined]
         return count
 
 
 class Constant(NodeDefinition):
     @group(defaults={"value": 0})
-    def tick(trigger: Trigger, cfg: Config) -> int:
+    def tick(trigger: Annotated[bool, TriggerMarker()], cfg: Config) -> int:
         return cfg["value"]
 
 
+# ---- 数据节点 ----------------------------------------------------------------
+
 class Sink(NodeDefinition):
-    last: State[int | None] = None
+    last: Annotated[int | None, StateMarker()] = None
 
     @group
     def consume(this, value: int) -> None:
-        this.last = value
+        this.last = value  # type: ignore[attr-defined]
 
 
 class Probe(NodeDefinition):
-    log: State[list[int]] = []
+    log: Annotated[list[int], StateMarker()] = []
 
     @group
     def observe(this, value: int) -> None:
-        this.log.append(value)
+        this.log.append(value)  # type: ignore[attr-defined]
 
 
 class Buffer(NodeDefinition):
-    items: State[list] = []
+    items: Annotated[list, StateMarker()] = []
 
     @group
-    def put(this, item: Append[int]) -> None:
-        this.items.extend(item)
+    def put(this, item: Annotated[list[int], AppendMarker()]) -> None:
+        this.items.extend(item)  # type: ignore[attr-defined]
 
     @group
-    def flush(this, trigger: Trigger) -> list:
-        items = this.items
-        this.items = []
-        return items if items else None
+    def flush(this, trigger: Annotated[bool, TriggerMarker()]) -> list:
+        items = this.items  # type: ignore[attr-defined]
+        this.items = []  # type: ignore[attr-defined]
+        return items if items else None  # type: ignore[return-value]
 
 
 class Join(NodeDefinition):
@@ -65,15 +80,21 @@ class Split(NodeDefinition):
         return {"out1": value, "out2": value}
 
 
+# ---- 信号节点 ----------------------------------------------------------------
+
 class Latch(NodeDefinition):
     @group
-    def release(gate: Signal, trigger: Trigger, data: Gated[int, "gate"]) -> int:
+    def release(
+        gate: Annotated[bool, SignalMarker()],
+        trigger: Annotated[bool, TriggerMarker()],
+        data: Annotated[int, GatedMarker("gate")],
+    ) -> int:
         return data
 
 
 class DataToSignal(NodeDefinition):
     @group(defaults={"mode": "truthy", "threshold": 0})
-    def convert(cfg: Config, data: int) -> Signal[bool]:
+    def convert(cfg: Config, data: int) -> Annotated[bool, SignalMarker()]:
         mode, threshold = cfg["mode"], cfg["threshold"]
         if mode == "truthy":
             return bool(data)
@@ -88,7 +109,10 @@ class DataToSignal(NodeDefinition):
 
 class SignalToData(NodeDefinition):
     @group(trigger="pass")
-    def pass_value(gate: Signal, x: Gated[int, "gate"]) -> int:
+    def pass_value(
+        gate: Annotated[bool, SignalMarker()],
+        x: Annotated[int, GatedMarker("gate")],
+    ) -> int:
         return x
 
 

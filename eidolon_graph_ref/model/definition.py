@@ -73,21 +73,21 @@ class NodeDefinitionMeta(type):
                         f"{name} cannot inherit from concrete node definition "
                         f"{base.__name__}; share materials instead"
                     )
-        cls = super().__new__(mcls, name, bases, namespace, **kwargs)
+        cls: type = super().__new__(mcls, name, bases, namespace, **kwargs)
         if name == "NodeDefinition":
             return cls
-        cls.TYPE = mcls._compile(cls, namespace)
+        cls.TYPE = mcls._compile(cls, namespace)  # type: ignore[attr-defined]
         return cls
 
     @staticmethod
-    def _compile(cls: type, namespace: dict[str, Any]) -> NodeType:
-        specs = tuple(getattr(cls, "groups", ()))
+    def _compile(target: type, namespace: dict[str, Any]) -> NodeType:
+        specs = tuple(getattr(target, "groups", ()))
         if not all(isinstance(spec, GroupSpec) for spec in specs):
-            raise DefinitionError(f"{cls.__name__}.groups must contain GroupSpec values")
+            raise DefinitionError(f"{target.__name__}.groups must contain GroupSpec values")
         compiled: list[Group] = []
         for spec in specs:
             if not spec.handler:
-                raise DefinitionError(f"{cls.__name__} group {spec.name!r} has no handler name")
+                raise DefinitionError(f"{target.__name__} group {spec.name!r} has no handler name")
             compiled.append(
                 Group(
                     name=spec.name,
@@ -95,28 +95,28 @@ class NodeDefinitionMeta(type):
                     triggers=tuple(spec.triggers),
                     outputs=tuple(spec.outputs),
                     defaults=dict(spec.defaults),
-                    handler=_static_handler(cls, spec.handler),
+                    handler=_static_handler(target, spec.handler),
                     readiness=spec.readiness,
                 )
             )
         try:
             node_type = NodeType(
-                name=namespace.get("type_name", cls.__name__),
-                data_in=tuple(getattr(cls, "data_in", ())),
-                data_out=tuple(getattr(cls, "data_out", ())),
-                trigger_in=tuple(getattr(cls, "trigger_in", ())),
-                signal_in=tuple(getattr(cls, "signal_in", ())),
-                signal_out=tuple(getattr(cls, "signal_out", ())),
-                asset_in=tuple(getattr(cls, "asset_in", ())),
-                state_defaults=dict(getattr(cls, "state_defaults", {})),
-                init_defaults=dict(getattr(cls, "init_defaults", {})),
+                name=namespace.get("type_name", target.__name__),
+                data_in=tuple(getattr(target, "data_in", ())),
+                data_out=tuple(getattr(target, "data_out", ())),
+                trigger_in=tuple(getattr(target, "trigger_in", ())),
+                signal_in=tuple(getattr(target, "signal_in", ())),
+                signal_out=tuple(getattr(target, "signal_out", ())),
+                asset_in=tuple(getattr(target, "asset_in", ())),
+                state_defaults=dict(getattr(target, "state_defaults", {})),
+                init_defaults=dict(getattr(target, "init_defaults", {})),
                 groups=tuple(compiled),
-                tags=tuple(getattr(cls, "tags", ())),
-                init=getattr(cls, "init", None),
-                doc=getattr(cls, "doc", None),
+                tags=tuple(getattr(target, "tags", ())),
+                init=getattr(target, "init", None),
+                doc=getattr(target, "doc", None),
             )
         except ValueError as e:
-            raise DefinitionError(f"{cls.__name__}: {e}") from e
+            raise DefinitionError(f"{target.__name__}: {e}") from e
         return node_type
 
 
