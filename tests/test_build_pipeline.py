@@ -1,7 +1,7 @@
 """构建管线回归测试:2026-08-23 同步审查发现的偏离修复锁定。
 
 - 资产构建期 isinstance 类型校验(graph-assets.md §8:resolve → isinstance → 注入)
-- init 返回未知状态字段 / 不可复制值 → BuildReport error(node-protocol.md §7)
+- init 返回未知状态字段 / 不可复制值 → GraphBuildError(node-protocol.md §7)
 - 注入按注入序入队(node-protocol.md §3.2;叠加 NodeTurn 预算,顺序即语义)
 - 端口跨类别同名 = IR 非法(_input_state 信号优先会遮蔽同名 DataIn)
 - 绑定信号的控制消费记录 KIND_CONSUME(消费因果进入时间线)
@@ -10,7 +10,7 @@
 
 import pytest
 
-from eidolon_graph_ref.engine import GraphInstance, Injection, Kind
+from eidolon_graph_ref.engine import GraphBuildError, GraphInstance, Injection, Kind
 from eidolon_graph_ref.engine.timeline import KIND_CONSUME, KIND_FIRE
 from eidolon_graph_ref.model import GraphDefinition, SLOT_DATA, SLOT_SIGNAL, SLOT_TRIGGER
 from eidolon_graph_ref.model.assets import AssetIn, AssetRef
@@ -33,16 +33,15 @@ def _asset_node(asset_in):
 
 # ==================================================================== 资产 isinstance 校验
 def test_wrong_type_asset_is_build_error():
-    """解析成功但类型不满足 Capability 接口 → BuildReport error(声明即必须的类型面)。"""
+    """解析成功但类型不满足 Capability 接口 → GraphBuildError(声明即必须的类型面)。"""
     system = FakeAssetSystem()
     cache_ref = system.create_cache("uri")  # FakeCache:有 get,无 query
     g = GraphDefinition()
     g.add_node("n", "AssetUser")
     g.bind_asset("n", "db", cache_ref.asset_id)
-    report = GraphInstance.build(g, {"AssetUser": _asset_node((AssetIn("db", DatabaseCapability),))}, asset_resolver=system)
-    assert not report.ok
-    assert "expected" in report.errors[0] and "DatabaseCapability" in report.errors[0]
-    assert report.instance is None
+    with pytest.raises(GraphBuildError) as exc:
+        GraphInstance.build(g, {"AssetUser": _asset_node((AssetIn("db", DatabaseCapability),))}, asset_resolver=system)
+    assert "expected" in exc.value.errors[0] and "DatabaseCapability" in exc.value.errors[0]
 
 
 def test_none_type_asset_skips_type_check():
@@ -52,8 +51,7 @@ def test_none_type_asset_skips_type_check():
     g = GraphDefinition()
     g.add_node("n", "AssetUser")
     g.bind_asset("n", "db", cache_ref.asset_id)
-    report = GraphInstance.build(g, {"AssetUser": _asset_node((AssetIn("db", None),))}, asset_resolver=system)
-    assert report.ok, report.errors
+    GraphInstance.build(g, {"AssetUser": _asset_node((AssetIn("db", None),))}, asset_resolver=system)
 
 
 # ==================================================================== init 校验
@@ -75,26 +73,25 @@ def _build_init(init, config=None, init_defaults=None):
 
 
 def test_init_unknown_state_field_is_build_error():
-    """init 返回未知状态字段 → BuildReport error,字段不得泄漏进 node_states。"""
-    report = _build_init(lambda ctx: {"ghost": 1})
-    assert not report.ok
-    assert "unknown state fields" in report.errors[0]
+    """init 返回未知状态字段 → GraphBuildError,字段不得泄漏进 node_states。"""
+    with pytest.raises(GraphBuildError) as exc:
+        _build_init(lambda ctx: {"ghost": 1})
+    assert "unknown state fields" in exc.value.errors[0]
 
 
 def test_init_non_copyable_delta_is_build_error():
-    """init 返回不可复制值(锁/连接类能力对象)→ BuildReport error(值域 = Value)。"""
+    """init 返回不可复制值(锁/连接类能力对象)→ GraphBuildError(值域 = Value)。"""
     import threading
 
-    report = _build_init(lambda ctx: {"real": threading.Lock()})
-    assert not report.ok
-    assert "init raised" in report.errors[0]
+    with pytest.raises(GraphBuildError) as exc:
+        _build_init(lambda ctx: {"real": threading.Lock()})
+    assert "init raised" in exc.value.errors[0]
 
 
 def test_init_valid_delta_merges_into_initial_state():
     """合法 init:初始状态 = state_defaults ⊕ init 增量;config init 节参与合并。"""
-    report = _build_init(lambda ctx: {"real": ctx.config["seed"] + 1}, config={"init": {"seed": 41}}, init_defaults={"seed": 0})
-    assert report.ok, report.errors
-    assert node_state(report.instance, "n")["real"] == 42
+    world = _build_init(lambda ctx: {"real": ctx.config["seed"] + 1}, config={"init": {"seed": 41}}, init_defaults={"seed": 0})
+    assert node_state(world, "n")["real"] == 42
 
 
 # ==================================================================== 注入按注入序入队
@@ -169,8 +166,7 @@ def test_observable_state_exposes_asset_structure_not_objects():
     g = GraphDefinition()
     g.add_node("n", "AssetUser")
     g.bind_asset("n", "db", ref.asset_id)
-    report = GraphInstance.build(g, {"AssetUser": _asset_node((AssetIn("db", DatabaseCapability),))}, asset_resolver=system)
-    assert report.ok, report.errors
-    view = report.instance.observable_state()["n"]
+    world = GraphInstance.build(g, {"AssetUser": _asset_node((AssetIn("db", DatabaseCapability),))}, asset_resolver=system)
+    view = world.observable_state()["n"]
     assert view["assets"] == {"db": {"ref": ref.asset_id, "resolved": True}}
     assert system.instance(ref.asset_id) not in view["assets"].values()  # 无对象泄漏

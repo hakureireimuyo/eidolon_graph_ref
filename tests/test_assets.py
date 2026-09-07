@@ -3,7 +3,7 @@
 依据:graph-assets.md §2-3, §7-8(编辑运行分离 / 声明即必须 / 身份独立于参数)。
 此处保留核心不变量:
 
-- 声明即必须:未绑定 / 解析失败 → BuildReport error(资产缺席是结构缺陷)
+- 声明即必须:未绑定 / 解析失败 → GraphBuildError(资产缺席是结构缺陷)
 - 共享/独立完全由 asset_id 决定
 - 降级由资产系统提供 Null 资产(真实 Capability)
 - 运行期断线 → KIND_ERROR,恢复后继续
@@ -14,7 +14,7 @@
 import pytest
 
 from eidolon_dsl import Asset, NodeDefinition, State, group
-from eidolon_graph_ref.engine import GraphInstance, Injection, Kind
+from eidolon_graph_ref.engine import GraphBuildError, GraphInstance, Injection, Kind
 from eidolon_graph_ref.engine.timeline import KIND_ERROR
 from eidolon_graph_ref.model import GraphDefinition, SLOT_DATA
 from eidolon_graph_ref.model.assets import AssetRef
@@ -47,9 +47,9 @@ def _build(type_, ref=None, resolver=None):
 
 # ==================================================================== 声明即必须
 def test_unbound_slot_is_build_error():
-    report = _build(DbQuery.TYPE, ref=None, resolver=FakeAssetSystem())
-    assert not report.ok
-    assert "asset slot 'db' is not bound" in report.errors[0]
+    with pytest.raises(GraphBuildError) as exc:
+        _build(DbQuery.TYPE, ref=None, resolver=FakeAssetSystem())
+    assert "asset slot 'db' is not bound" in exc.value.errors[0]
 
 
 def test_resolve_failure_is_build_error():
@@ -57,9 +57,9 @@ def test_resolve_failure_is_build_error():
         def resolve(self, ref):
             raise KeyError("unknown asset")
 
-    report = _build(DbQuery.TYPE, ref=AssetRef("ghost"), resolver=Broken())
-    assert not report.ok
-    assert "asset resolve failed" in report.errors[0]
+    with pytest.raises(GraphBuildError) as exc:
+        _build(DbQuery.TYPE, ref=AssetRef("ghost"), resolver=Broken())
+    assert "asset resolve failed" in exc.value.errors[0]
 
 
 # ==================================================================== 身份语义
@@ -72,9 +72,7 @@ def test_shared_and_independent_by_asset_id():
     for nid, ref in (("a", shared), ("b", shared), ("c", independent)):
         g.add_node(nid, "DbQuery")
         g.bind_asset(node_id=nid, slot="db", asset_id=ref.asset_id)
-    report = GraphInstance.build(g, {"DbQuery": DbQuery.TYPE}, asset_resolver=system)
-    assert report.ok, report.errors
-    world = report.instance
+    world = GraphInstance.build(g, {"DbQuery": DbQuery.TYPE}, asset_resolver=system)
     for nid in ("a", "b", "c"):
         world.run([Injection(nid, "query.sql", SLOT_DATA, Kind.DATA, "S")])
     produced = [e.payload[0] for e in world.timeline.events.values() if e.producer in ("a", "b", "c")]
@@ -85,9 +83,7 @@ def test_shared_and_independent_by_asset_id():
 def test_null_asset_downgrade_is_real_capability():
     system = FakeAssetSystem()
     null_ref = system.create_null_db()
-    report = _build(DbQuery.TYPE, ref=null_ref, resolver=system)
-    assert report.ok, report.errors
-    world = report.instance
+    world = _build(DbQuery.TYPE, ref=null_ref, resolver=system)
     world.run([Injection("n", "query.sql", SLOT_DATA, Kind.DATA, "S")])
     assert [e.payload for e in world.timeline.events.values() if e.producer == "n"] == [[]]
 
@@ -96,9 +92,7 @@ def test_null_asset_downgrade_is_real_capability():
 def test_runtime_failure_records_kind_error_then_recovers():
     system = FakeAssetSystem()
     ref = system.create_db("uri")
-    report = _build(DbQuery.TYPE, ref=ref, resolver=system)
-    assert report.ok, report.errors
-    world = report.instance
+    world = _build(DbQuery.TYPE, ref=ref, resolver=system)
 
     system.fail(ref.asset_id)  # 只有资产系统能置位断线
     world.run([Injection("n", "query.sql", SLOT_DATA, Kind.DATA, "S")])
@@ -118,9 +112,7 @@ def test_state_rejects_non_copyable_capability():
         def resolve(self, ref):
             return self.db
 
-    report = _build(DbRemember.TYPE, ref=AssetRef("locked"), resolver=Resolver())
-    assert report.ok, report.errors
-    world = report.instance
+    world = _build(DbRemember.TYPE, ref=AssetRef("locked"), resolver=Resolver())
     world.run([Injection("n", "grab.x", SLOT_DATA, Kind.DATA, 1)])
     assert any("non-copyable state" in e.message for e in world.timeline.entries if e.kind == KIND_ERROR)
 

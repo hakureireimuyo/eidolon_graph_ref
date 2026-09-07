@@ -415,7 +415,7 @@ NodeTurn 预算、handler 调用、输出校验与扇出投递——不含任何
       任何构造路径不可绕过;DSL 编译期转 DefinitionError)
     → eager 资产解析(逐节点按声明序:绑定 lookup → resolve → isinstance → 注入)
     → init(§7,config = init_effective,每节点至多一次)
-    → 实例构造(失败则 BuildReport error,不存在可 run() 的半成品实例)
+    → 实例构造(失败则 `GraphBuildError`,不存在可 run() 的半成品实例)
 ```
 
 ### 3.2 epoch 与 fire
@@ -448,7 +448,7 @@ fire 流程:
 
 | 错误 | 层级 | 语义 |
 |---|---|---|
-| init 失败 / 资产解析失败 / 结构非法 / 声明非法 | 构建期 | BuildReport error;不存在可 run() 的实例;不进 KIND_ERROR |
+| init 失败 / 资产解析失败 / 结构非法 / 声明非法 | 构建期 | `GraphBuildError`;不存在可 run() 的实例;不进 KIND_ERROR |
 | handler 异常 | 执行期 | KIND_ERROR + 无输出 + pending 保留,下 epoch 重试 |
 | 状态/产出值域违规 | 执行期 | KIND_ERROR + 拒绝提交/产出 |
 | 未声明输出(∉ group.outputs) | 执行期 | KIND_ERROR + 丢弃该输出 |
@@ -478,7 +478,7 @@ ownership alias 的边界,而非传播路径。
 | **解析** | 绑定解析成什么对象 | 构建期 | `AssetResolver.resolve(ref)` + `isinstance` |
 | **对象** | 节点实际拿到什么 | 运行期 | `ctx.assets[槽名]`(Capability) |
 
-- **声明即必须**:声明的槽位构建期必须绑定且解析成功,否则 BuildReport
+- **声明即必须**:声明的槽位构建期必须绑定且解析成功,否则 `GraphBuildError`
   error;降级由资产系统提供 Null 资产,内核永不出 None 槽位。
 - `ctx.assets` 键集合 = `asset_in` 声明集合;浅拷贝注入;**节点级共享,不按
   组切分**(Asset 是 Node 成员环境,不是某次调用的参数);只有使用权,
@@ -582,7 +582,7 @@ class InitContext:
 - **返回语义**:`dict` = 初始状态增量,合并于 `state_defaults`;
   `None` = 无增量。
 - **错误形态(构建期,与执行期分层)**:返回未知状态字段、不可复制值,
-  或 init 抛异常 → BuildReport error、`instance is None`。
+  或 init 抛异常 → `GraphBuildError`。
 - **兼容性**:默认 `None` = 无行为变化。
 - `init_defaults` 仅 init 可见,不参与 Group 行为参数覆盖——构建 Node 与
   执行 Group 是两个生命周期阶段。

@@ -58,10 +58,7 @@ def build() -> GraphDefinition:
 def main() -> None:
     g = build()
     ensure_valid(g, PRIMITIVES)  # 连线合法性校验
-    result = GraphInstance.build(g, PRIMITIVES)
-    if not result.ok:
-        raise RuntimeError(result.errors)
-    world = result.instance
+    world = GraphInstance.build(g, PRIMITIVES)
 
     def show(note: str) -> None:
         run = world.run_no

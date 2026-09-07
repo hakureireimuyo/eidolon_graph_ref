@@ -117,9 +117,7 @@ def test_material_mixin_compiles_and_runs():
     assert MaterialNode.TYPE.name == "MaterialNode"
     graph = GraphDefinition()
     graph.add_node("node", "MaterialNode")
-    report = GraphInstance.build(graph, {"MaterialNode": MaterialNode.TYPE})
-    assert report.ok
-    world = report.instance
+    world = GraphInstance.build(graph, {"MaterialNode": MaterialNode.TYPE})
     world.run([Injection("node", "v", SLOT_DATA, Kind.DATA, "hello")])
     assert [e.payload for e in world.timeline.events.values() if e.producer == "node"] == ["hello"]
 
@@ -142,9 +140,7 @@ def test_concrete_class_shadows_material_handler():
     assert Doubling.TYPE.groups[0].handler is Doubling.__dict__["echo"].__func__
     graph = GraphDefinition()
     graph.add_node("node", "Doubling")
-    report = GraphInstance.build(graph, {"Doubling": Doubling.TYPE})
-    assert report.ok
-    world = report.instance
+    world = GraphInstance.build(graph, {"Doubling": Doubling.TYPE})
     world.run([Injection("node", "v", SLOT_DATA, Kind.DATA, 21)])
     assert [e.payload for e in world.timeline.events.values() if e.producer == "node"] == [42]
 
@@ -168,9 +164,7 @@ def test_final_node_semantics_interprets_data_signal_and_trigger_orthogonally():
     )
     graph = GraphDefinition()
     graph.add_node("node", "Controlled")
-    report = GraphInstance.build(graph, {"Controlled": controlled})
-    assert report.ok
-    world = report.instance
+    world = GraphInstance.build(graph, {"Controlled": controlled})
 
     world.run([
         Injection("node", "gate", SLOT_SIGNAL, Kind.SIGNAL, False),

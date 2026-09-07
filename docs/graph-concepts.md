@@ -103,8 +103,8 @@
 - **消费**:fire 后清除本组端口 pending;value / level 保持。
 - **零拷贝**:值域探针只校验不复制;扇出共享载荷引用——输入视为只读,产出构造新对象。
 - **值域**:State / Data / Event 载荷 = Value(可复制);Capability 禁止入内。
-- **BuildReport**:构建结果一次性收集全部错误;失败则不存在实例。
-- **错误分层**:构建期(BuildReport error)/ 执行期(KIND_ERROR + 无输出 + pending 保留,下 epoch 重试)。
+- **GraphBuildError**:构建期一次性收集全部错误并抛出;失败则不存在实例。
+- **错误分层**:构建期(`GraphBuildError`)/ 执行期(KIND_ERROR + 无输出 + pending 保留,下 epoch 重试)。
 
 ## 十、连线
 

@@ -70,9 +70,7 @@ class BufferDs(NodeDefinition):
 def _build(node_type: NodeType):
     graph = GraphDefinition()
     graph.add_node("n", node_type.name)
-    report = GraphInstance.build(graph, {node_type.name: node_type})
-    assert report.ok, report.errors
-    return report.instance
+    return GraphInstance.build(graph, {node_type.name: node_type})
 
 
 def _produced(world, node: str = "n"):
@@ -145,9 +143,7 @@ def test_counter_state_and_trigger():
 def test_counter_config_override_uses_port_config():
     graph = GraphDefinition()
     graph.add_node("n", "Counter", config={"ports": {"tick.step": 5}})
-    report = GraphInstance.build(graph, {"Counter": Counter.TYPE})
-    assert report.ok, report.errors
-    world = report.instance
+    world = GraphInstance.build(graph, {"Counter": Counter.TYPE})
     world.run([Injection("n", "tick.trigger", SLOT_TRIGGER, Kind.SIGNAL, True)])
     assert _produced(world) == [5]
 
@@ -169,11 +165,9 @@ def test_gate_wired_signal_selects_dynamic_vs_fallback():
     graph.add_node("sink", "Sink")
     graph.wire("dts", "convert", "n", "release.gate", slot=SLOT_SIGNAL)
     graph.wire("n", "release", "sink", "consume.value")
-    report = GraphInstance.build(
+    world = GraphInstance.build(
         graph, {"Gate": Gate.TYPE, "DataToSignal": PRIMITIVES["DataToSignal"], "Sink": PRIMITIVES["Sink"]}
     )
-    assert report.ok, report.errors
-    world = report.instance
 
     world.run([Injection("dts", "convert.data", SLOT_DATA, Kind.DATA, 0)])  # gate → LOW
     # 裁定 16:仅有门控信号、无数据新事实 → 不触发
@@ -297,9 +291,7 @@ def test_asset_parameter_receives_resolved_capability():
     graph = GraphDefinition()
     graph.add_node("n", "DbQuery")
     graph.bind_asset(node_id="n", slot="db", asset_id=ref.asset_id)
-    report = GraphInstance.build(graph, {"DbQuery": DbQuery.TYPE}, asset_resolver=system)
-    assert report.ok, report.errors
-    world = report.instance
+    world = GraphInstance.build(graph, {"DbQuery": DbQuery.TYPE}, asset_resolver=system)
     world.run([Injection("n", "query.sql", SLOT_DATA, Kind.DATA, "SELECT 1")])
     assert _produced(world) == [["db-1:SELECT 1"]]
     assert _errors(world) == []

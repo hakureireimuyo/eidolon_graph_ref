@@ -24,7 +24,7 @@ class AssetIn:
     """资产输入声明 = 节点需要某个 Capability(与 data_in 等并列的声明维度)。
 
     **声明即必须**(2026-08-20 裁定,替代原"可选 → None"语义):声明的槽位
-    在构建期必须绑定且解析成功,否则 BuildReport error——资产是资源而非
+    在构建期必须绑定且解析成功,否则 GraphBuildError——资产是资源而非
     数据,缺席是结构缺陷,不存在"槽位为 None"的运行形态。需要降级时由
     资产系统提供 Null 资产(真实 Capability),节点代码永不需要 None 分支。
 

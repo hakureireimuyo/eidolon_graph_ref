@@ -121,7 +121,7 @@ source → parse → type check → link → initialize → execute
 | 错误 | 层级 | 语义 |
 |---|---|---|
 | 资产初始化失败(连接建立失败) | 资产系统 | 发生在 Graph 构建之前;资产系统内部重试/降级/替换,Graph 不可见 |
-| 解析失败 / 类型不符 / 必需资产未绑定 | 构建期 | BuildReport error;不存在可继续 `run()` 的实例;不进 KIND_ERROR、不进时间线 |
+| 解析失败 / 类型不符 / 必需资产未绑定 | 构建期 | `GraphBuildError`;不存在可继续 `run()` 的实例;不进 KIND_ERROR、不进时间线 |
 | 运行期资产失效(tick 内调用失败) | 执行期 | 普通 tick 异常 → 既有 KIND_ERROR 语义;恢复/替换由资产系统负责,Graph 不感知 |
 | 释放 | 资产系统 | GraphInstance 销毁仅释放自身引用,不调用任何 `close()` |
 
@@ -132,8 +132,8 @@ source → parse → type check → link → initialize → execute
 
 | 问题 | 裁定 |
 |---|---|
-| 资产槽位未绑定 | **声明即必须**(2026-08-20 修订,替代原"可选 → None"裁定):声明的槽位构建期必须绑定且解析成功,否则 BuildReport error——资产是资源而非数据,缺席是结构缺陷,不允许"运行时才发现"。降级需求由资产系统提供 Null 资产(真实 Capability),内核永不出 None 槽位 |
-| 构建错误形态 | `BuildReport` 一次性收集全部错误(资产依赖多,逐个报错会让宿主反复启动);`ok=False` 时**不存在** GraphInstance。API 为 `result = GraphInstance.build(...)`,禁止"构造半成品再 try resolve" |
+| 资产槽位未绑定 | **声明即必须**(2026-08-20 修订,替代原"可选 → None"裁定):声明的槽位构建期必须绑定且解析成功,否则 `GraphBuildError`——资产是资源而非数据,缺席是结构缺陷,不允许"运行时才发现"。降级需求由资产系统提供 Null 资产(真实 Capability),内核永不出 None 槽位 |
+| 构建错误形态 | `GraphBuildError` 一次性收集全部错误(资产依赖多,逐个报错会让宿主反复启动);成功 API 为 `world = GraphInstance.build(...)`,失败直接抛异常,不存在可用实例 |
 | 绑定归属 | **GraphDefinition**(编辑期纯数据)。NodeType 声明"需要什么",图指定"使用哪个",实例解析"实际是什么"。类型声明不应知道具体运行环境的资产身份 |
 | AssetRef 内容 | 仅 `asset_id`(实例身份),不含创建参数。参数属于资产系统创建时的配置 |
 | 共享 / 独立 | 不由 Runtime 强制,完全由 AssetRef 指向哪个 `asset_id` 决定 |
@@ -167,10 +167,10 @@ g.bind_asset("db_query", "database", "main_db")
 class AssetResolver(Protocol):
     def resolve(self, ref: AssetRef) -> Any: ...
 
-result = GraphInstance.build(g, types, asset_resolver=host_resolver)
-if not result.ok:
-    print(result.errors)          # 全部错误;result.instance is None
-world = result.instance
+try:
+   world = GraphInstance.build(g, types, asset_resolver=host_resolver)
+except GraphBuildError as error:
+   print(error.errors)            # 全部构建错误;异常后不存在可运行实例
 
 # tick 访问;键集合 = 声明集合;tick 不可写资产
 ctx.assets["database"]            # 构建期已解析成功(声明即必须),恒为 Capability
@@ -197,8 +197,8 @@ ctx.assets["database"]            # 构建期已解析成功(声明即必须),�
 
 1. 同一 Asset 被多个节点共享(同一 `asset_id` → 同一底层实例)
 2. 相同参数创建两个独立 Asset(身份独立于参数)
-3. 资产未绑定或缺失 → BuildReport error(声明即必须);降级经资产系统 Null 资产(真实 Capability)
-4. 类型错误 → BuildReport error;多错误一次收集
+3. 资产未绑定或缺失 → `GraphBuildError`(声明即必须);降级经资产系统 Null 资产(真实 Capability)
+4. 类型错误 → `GraphBuildError`;多错误一次收集
 5. GraphInstance 销毁不关闭 Asset(所有权在资产系统)
 6. 运行期间 Asset 失效 → tick 异常 / KIND_ERROR,不产生任何传播事件;
    资产系统恢复后下一 epoch 正常执行

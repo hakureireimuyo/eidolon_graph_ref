@@ -8,7 +8,6 @@ index build → port initial states.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ..model.assets import AssetRef
@@ -24,11 +23,12 @@ class AssetResolver(Protocol):
     def resolve(self, ref: AssetRef) -> Any: ...
 
 
-@dataclass(frozen=True)
-class BuildReport:
-    ok: bool
-    errors: tuple[str, ...]
-    instance: "GraphInstance | None" = None
+class GraphBuildError(RuntimeError):
+    """Raised when a graph cannot be built into an executable instance."""
+
+    def __init__(self, errors: tuple[str, ...]):
+        self.errors = errors
+        super().__init__("graph build failed: " + "; ".join(errors))
 
 
 class GraphInstance:
@@ -54,7 +54,7 @@ class GraphInstance:
         self._build()
 
     @classmethod
-    def build(cls, definition, types, asset_resolver=None):
+    def build(cls, definition, types, asset_resolver=None) -> "GraphInstance":
         """Validate and build a graph from already compiled node types.
 
         ``types`` may be a plain mapping for compatibility or a
@@ -65,7 +65,7 @@ class GraphInstance:
 
         errors = list(validate(definition, types).errors)
         if errors:
-            return BuildReport(False, tuple(errors))
+            raise GraphBuildError(tuple(errors))
         assets = {}
         init_states = {}
         asset_refs = {}
@@ -110,8 +110,8 @@ class GraphInstance:
                 except Exception as e:
                     errors.append(f"node {nid!r}: init raised {type(e).__name__}: {e}")
         if errors:
-            return BuildReport(False, tuple(errors))
-        return BuildReport(True, (), cls(definition, types, assets, init_states, asset_refs, _internal=True))
+            raise GraphBuildError(tuple(errors))
+        return cls(definition, types, assets, init_states, asset_refs, _internal=True)
 
     def _build(self):
         for w in self.definition.wires:
