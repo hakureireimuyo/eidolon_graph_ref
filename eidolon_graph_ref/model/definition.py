@@ -76,11 +76,11 @@ class NodeDefinitionMeta(type):
         cls: type = super().__new__(mcls, name, bases, namespace, **kwargs)
         if name == "NodeDefinition":
             return cls
-        cls.TYPE = mcls._compile(cls, namespace)  # type: ignore[attr-defined]
+        cls.TYPE = NodeDefinitionCompiler.compile(cls, namespace)  # type: ignore[attr-defined]
         return cls
 
     @staticmethod
-    def _compile(target: type, namespace: dict[str, Any]) -> NodeType:
+    def compile(target: type, namespace: dict[str, Any]) -> NodeType:
         specs = tuple(getattr(target, "groups", ()))
         if not all(isinstance(spec, GroupSpec) for spec in specs):
             raise DefinitionError(f"{target.__name__}.groups must contain GroupSpec values")
@@ -118,6 +118,23 @@ class NodeDefinitionMeta(type):
         except ValueError as e:
             raise DefinitionError(f"{target.__name__}: {e}") from e
         return node_type
+
+
+class NodeDefinitionCompiler:
+    """Compile a concrete node declaration into the kernel's ``NodeType`` ABI.
+
+    The Python metaclass invokes this compiler during class creation. Keeping
+    the operation named and public makes the boundary explicit: this is node
+    definition compilation, not graph validation or runtime construction.
+    """
+
+    @staticmethod
+    def compile(target: type, namespace: dict[str, Any] | None = None) -> NodeType:
+        if not isinstance(target, NodeDefinitionMeta) or target.__name__ == "NodeDefinition":
+            raise DefinitionError("target must be a concrete NodeDefinition class")
+        if namespace is None:
+            return target.TYPE
+        return NodeDefinitionMeta.compile(target, namespace)
 
 
 class NodeDefinition(metaclass=NodeDefinitionMeta):

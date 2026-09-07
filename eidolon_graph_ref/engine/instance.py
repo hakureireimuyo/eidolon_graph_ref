@@ -32,6 +32,8 @@ class BuildReport:
 
 
 class GraphInstance:
+    """Executable graph instance produced by the graph builder."""
+
     def __init__(self, definition, types, assets=None, init_states=None, asset_refs=None, *, _internal=False):
         if not _internal:
             raise TypeError("use GraphInstance.build()")
@@ -53,6 +55,12 @@ class GraphInstance:
 
     @classmethod
     def build(cls, definition, types, asset_resolver=None):
+        """Validate and build a graph from already compiled node types.
+
+        ``types`` may be a plain mapping for compatibility or a
+        ``NodeRegistry``. Node definition compilation is complete before this
+        graph-level boundary is entered.
+        """
         from ..model.validate import validate
 
         errors = list(validate(definition, types).errors)

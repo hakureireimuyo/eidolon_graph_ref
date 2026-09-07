@@ -9,8 +9,10 @@ from typing import Annotated
 from eidolon_dsl import (
     AppendMarker,
     Config,
+    DataEvent,
     GatedMarker,
     NodeDefinition,
+    SignalEvent,
     SignalMarker,
     StateMarker,
     TriggerMarker,
@@ -24,16 +26,17 @@ class Source(NodeDefinition):
     count: Annotated[int, StateMarker()] = 0
 
     @group(defaults={"step": 1})
-    def tick(this, trigger: Annotated[bool, TriggerMarker()], cfg: Config) -> int:
+    def tick(this, trigger: Annotated[bool, TriggerMarker()], cfg: Config) -> DataEvent:
         count = this.count  # type: ignore[attr-defined]
         this.count = count + cfg["step"]  # type: ignore[attr-defined]
-        return count
+        return DataEvent(count=count)
 
 
 class Constant(NodeDefinition):
+    @staticmethod
     @group(defaults={"value": 0})
-    def tick(trigger: Annotated[bool, TriggerMarker()], cfg: Config) -> int:
-        return cfg["value"]
+    def tick(trigger: Annotated[bool, TriggerMarker()], cfg: Config) -> DataEvent:
+        return DataEvent(value=cfg["value"])
 
 
 # ---- 数据节点 ----------------------------------------------------------------
@@ -62,58 +65,63 @@ class Buffer(NodeDefinition):
         this.items.extend(item)  # type: ignore[attr-defined]
 
     @group
-    def flush(this, trigger: Annotated[bool, TriggerMarker()]) -> list:
+    def flush(this, trigger: Annotated[bool, TriggerMarker()]) -> DataEvent | None:
         items = this.items  # type: ignore[attr-defined]
         this.items = []  # type: ignore[attr-defined]
-        return items if items else None  # type: ignore[return-value]
+        return DataEvent(items=items) if items else None
 
 
 class Join(NodeDefinition):
+    @staticmethod
     @group
-    def join(a: int, b: int) -> tuple[int, int]:
-        return (a, b)
+    def join(a: int, b: int) -> DataEvent:
+        return DataEvent(pair=(a, b))
 
 
 class Split(NodeDefinition):
+    @staticmethod
     @group(outputs=("out1", "out2"))
-    def fan(value: int) -> dict:
-        return {"out1": value, "out2": value}
+    def fan(value: int) -> DataEvent:
+        return DataEvent(out1=value, out2=value)
 
 
 # ---- 信号节点 ----------------------------------------------------------------
 
 class Latch(NodeDefinition):
+    @staticmethod
     @group
     def release(
         gate: Annotated[bool, SignalMarker()],
         trigger: Annotated[bool, TriggerMarker()],
         data: Annotated[int, GatedMarker("gate")],
-    ) -> int:
-        return data
+    ) -> DataEvent:
+        return DataEvent(data=data)
 
 
 class DataToSignal(NodeDefinition):
+    @staticmethod
     @group(defaults={"mode": "truthy", "threshold": 0})
-    def convert(cfg: Config, data: int) -> Annotated[bool, SignalMarker()]:
+    def convert(cfg: Config, data: int) -> SignalEvent:
         mode, threshold = cfg["mode"], cfg["threshold"]
         if mode == "truthy":
-            return bool(data)
+            return SignalEvent(value=bool(data))
         if mode == "gt":
-            return data > threshold
+            return SignalEvent(value=data > threshold)
         if mode == "lt":
-            return data < threshold
+            return SignalEvent(value=data < threshold)
         if mode == "eq":
-            return data == threshold
+            return SignalEvent(value=data == threshold)
         raise ValueError(f"unknown mode {mode!r}")
 
 
 class SignalToData(NodeDefinition):
+    @staticmethod
     @group(trigger="pass")
     def pass_value(
         gate: Annotated[bool, SignalMarker()],
         x: Annotated[int, GatedMarker("gate")],
-    ) -> int:
-        return x
+    ) -> DataEvent:
+        return DataEvent(value=x)
 
 
 PRIMITIVE_DEFINITIONS = (Source, Constant, Sink, Probe, Buffer, Join, Split, Latch, DataToSignal, SignalToData)

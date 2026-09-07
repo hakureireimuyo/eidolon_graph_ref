@@ -78,8 +78,10 @@ NodeType 的身份是**语义 IR**:DSL 的编译目标、内核的唯一输入�
 | `Asset[T]` | 参数 | 资产依赖(节点级声明) | `AssetIn(name, T)` |
 | `State[T] = v` | 类属性 | 节点级状态 | `state_defaults` |
 | `-> T` | 返回值 | 数据输出(名 = 组名) | `DataOut("{group}")` |
+| `DataEvent(...)` | 返回值 | 显式数据输出载荷 | 编译为 `GroupOutput.data_out` |
 | `-> None` | 返回值 | 无输出事件 | 无 |
 | `-> Signal[bool]` | 返回值 | 信号输出 | `SignalOut("{group}")` |
+| `SignalEvent(...)` | 返回值 | 显式信号输出载荷 | 编译为 `GroupOutput.signal_out` |
 
 ### 2.2 `@group` 装饰器参数
 

@@ -18,7 +18,9 @@ The DSL borrows Python *syntax*, not Python semantics:
 - parameter default == DataIn fallback for an absent input event (NOT a
   graph-config default; ``@group(defaults=...)`` is the config surface)
 - return annotation == output declaration; ``-> None`` == no output event;
-  ``-> Signal[bool]`` == signal output; ``@group(outputs=(...))`` and
+    ``DataEvent(...)`` / ``SignalEvent(...)`` make the source-level payload
+    explicit; the compiler unwraps them before producing ``GroupOutput``;
+    ``-> Signal[bool]`` == signal output; ``@group(outputs=(...))`` and
   ``@group(signals=(...))`` declare multiple data / signal outputs — the
   handler then returns a dict keyed by declared port name (a missing key ==
   no event for that port; a None value is a legal payload emitted as-is)
@@ -127,6 +129,43 @@ class Asset:
 
     def __class_getitem__(cls, t) -> _Marker:
         return _Marker(("asset", t))
+
+
+@dataclass(frozen=True, init=False)
+class DataEvent:
+    """Source-level data output wrapper.
+
+    The named fields describe the output payload.  The compiler converts this
+    wrapper to the existing GroupOutput protocol; the kernel still creates the
+    runtime Event and owns its identity and lifecycle.
+    """
+
+    fields: Mapping[str, Any]
+
+    def __init__(self, **fields: Any):
+        if not fields:
+            raise TypeError("DataEvent requires at least one named field")
+        object.__setattr__(self, "fields", dict(fields))
+
+    @property
+    def payload(self) -> Any:
+        return next(iter(self.fields.values())) if len(self.fields) == 1 else dict(self.fields)
+
+
+@dataclass(frozen=True, init=False)
+class SignalEvent:
+    """Source-level signal output wrapper, symmetrical with DataEvent."""
+
+    fields: Mapping[str, Any]
+
+    def __init__(self, **fields: Any):
+        if not fields:
+            raise TypeError("SignalEvent requires at least one named field")
+        object.__setattr__(self, "fields", dict(fields))
+
+    @property
+    def payload(self) -> Any:
+        return next(iter(self.fields.values())) if len(self.fields) == 1 else dict(self.fields)
 
 
 # ---- Annotated metadata markers (Python Surface Language) --------------------
@@ -511,7 +550,7 @@ def interpret_return(ret: ReturnDeclaration, opts: _GroupOpts, gname: str, where
     ann = ret.annotation
     if ann is inspect.Signature.empty or ann is None or ann is type(None):
         out_kind = None
-    elif isinstance(ann, _Marker) and ann.args[0] == "signal_out":
+    elif ann is SignalEvent or (isinstance(ann, _Marker) and ann.args[0] == "signal_out"):
         out_kind = "signal"  # old form: -> Signal[bool]
     else:
         meta = getattr(ann, "__metadata__", None)
@@ -672,6 +711,14 @@ def generate_handler_wrapper(fn, params: tuple[InterpretedParameter, ...], outpu
         result = fn(*args)
         out = GroupOutput()
         total = len(data_names) + len(signal_names)
+        if isinstance(result, (DataEvent, SignalEvent)):
+            expected = SignalEvent if signal_names else DataEvent
+            if not isinstance(result, expected):
+                raise TypeError(
+                    f"group output wrapper {type(result).__name__} does not match "
+                    f"declared output kind {expected.__name__}"
+                )
+            result = result.payload if total == 1 else result.fields
         if result is not None:
             if total == 0:
                 # 「写必须声明」:无输出端口的组返回载荷属违规产出(裁定收紧)。
@@ -758,11 +805,12 @@ class _DSLMeta(NodeDefinitionMeta):
 
         found = False
         for attr, value in list(namespace.items()):
-            opts = getattr(value, "_eidolon_group", None)
+            fn = value.__func__ if isinstance(value, staticmethod) else value
+            opts = getattr(fn, "_eidolon_group", None)
             if opts is None:
                 continue
             found = True
-            spec, wrapper, ports = _compile_group(name, value, opts)
+            spec, wrapper, ports = _compile_group(name, fn, opts)
             groups.append(spec)
             namespace[attr] = staticmethod(wrapper)
             data_ins.extend(ports.data_in)

@@ -18,6 +18,8 @@ from eidolon_graph_ref.model import (
     Group,
     GroupSpec,
     NodeDefinition,
+    NodeDefinitionCompiler,
+    NodeRegistry,
     NodeType,
     SignalIn,
     SLOT_DATA,
@@ -46,6 +48,21 @@ def test_concrete_node_cannot_be_a_behavior_supplier():
 def test_definition_classes_cannot_be_instantiated():
     with pytest.raises(TypeError, match="compile-time declarations"):
         Echo()
+
+
+def test_compiler_and_registry_expose_the_definition_boundary():
+    compiled = NodeDefinitionCompiler.compile(Echo)
+    registry = NodeRegistry()
+
+    assert compiled is Echo.TYPE
+    registry.register(compiled)
+    assert registry["Echo"] is Echo.TYPE
+
+    with pytest.raises(TypeError, match="compiled NodeType"):
+        registry.register(Echo)
+
+    with pytest.raises(ValueError, match="duplicate node type"):
+        registry.register(Echo.TYPE)
 
 def test_dsl_rejects_input_shared_across_groups():
     """IR 不变式在 DSL 编译期生效:共享输入端口 = DefinitionError(错误前置到 import 时)。"""

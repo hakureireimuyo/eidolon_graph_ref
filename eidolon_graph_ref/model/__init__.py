@@ -3,7 +3,8 @@
 from .assets import AssetIn, AssetRef
 from .graph import GraphDefinition, NodeSpec, Wire, SLOT_DATA, SLOT_TRIGGER, SLOT_SIGNAL
 from .node_type import DocSection, DocSpec, Group, NodeType
-from .definition import DefinitionError, GroupSpec, NodeDefinition
+from .definition import DefinitionError, GroupSpec, NodeDefinition, NodeDefinitionCompiler
+from .registry import NodeRegistry
 from .readiness import ALL, ANY, DATA, TRIGGER
 from .ports import APPEND, REPLACE, DataIn, DataOut, SignalIn, SignalOut, TriggerIn
 from .validate import ValidationError, ValidationResult, ensure_valid, validate
@@ -24,6 +25,8 @@ __all__ = [
     "DefinitionError",
     "GroupSpec",
     "NodeDefinition",
+    "NodeDefinitionCompiler",
+    "NodeRegistry",
     "ALL",
     "ANY",
     "DATA",

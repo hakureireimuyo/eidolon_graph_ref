@@ -14,8 +14,10 @@ from eidolon_dsl import (
     Append,
     Asset,
     Config,
+    DataEvent,
     Gated,
     Signal,
+    SignalEvent,
     Trigger,
     _Marker,
     _compile_group,
@@ -315,6 +317,42 @@ def test_generate_handler_wrapper_single_output_and_state():
     out = handler(ctx)
     assert out.data_out == {"g": 5}
     assert out.state == {"count": 5}
+
+
+def test_generate_handler_wrapper_event_objects():
+    """源代码事件对象在 GroupOutput 边界还原为 payload。"""
+
+    def data_fn(x: int) -> DataEvent:
+        return DataEvent(items=x)
+
+    where = _where()
+    decls, ret = extract_parameters(data_fn, where)
+    params = interpret_parameters(decls, "g", where)
+    outputs = interpret_return(ret, _GroupOpts(), "g", where)
+    handler = generate_handler_wrapper(data_fn, params, outputs)
+    out = handler(GroupContext("g", {"g.x": 5}, {}, {}))
+    assert out.data_out == {"g": 5}
+
+    def signal_fn(x: int) -> SignalEvent:
+        return SignalEvent(level=x > 0)
+
+    decls, ret = extract_parameters(signal_fn, where)
+    params = interpret_parameters(decls, "g", where)
+    outputs = interpret_return(ret, _GroupOpts(), "g", where)
+    handler = generate_handler_wrapper(signal_fn, params, outputs)
+    out = handler(GroupContext("g", {"g.x": 1}, {}, {}))
+    assert out.signal_out == {"g": True}
+
+    def multi_fn(x: int) -> DataEvent:
+        return DataEvent(first=x, second=x + 1)
+
+    opts = _GroupOpts(outputs=("first", "second"))
+    decls, ret = extract_parameters(multi_fn, where)
+    params = interpret_parameters(decls, "g", where)
+    outputs = interpret_return(ret, opts, "g", where)
+    handler = generate_handler_wrapper(multi_fn, params, outputs)
+    out = handler(GroupContext("g", {"g.x": 5}, {}, {}))
+    assert out.data_out == {"g.first": 5, "g.second": 6}
 
 
 def test_generate_handler_wrapper_dict_protocol():
